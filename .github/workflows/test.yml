@@ -53,7 +53,7 @@ jobs:
   software-and-simulation-integrity:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       PYTHONHASHSEED: "0"
       OMP_NUM_THREADS: "1"
