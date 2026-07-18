@@ -227,12 +227,14 @@ requires both workflows to pass before merge; each uploads machine-readable
 evidence, and neither uses a fail-open command. Classic protection for `main`
 was enabled and independently read back through the GitHub API on 2026-07-18.
 It requires the eight exact Gate 1/Gate 2 job names from GitHub Actions
-(`app_id` 15368), strict branch updating, one approving review, dismissal of
-stale reviews, approval of the latest reviewable push, resolved conversations,
-and linear history. The rule applies to administrators and disables force
-pushes and branch deletion. At the audit date the repository had only one
-collaborator, so an independent collaborator with write access must review the
-pull request before merge; self-approval cannot satisfy the rule.
+(`app_id` 15368), strict branch updating, a pull request, resolved
+conversations, and linear history. The rule applies to administrators and
+disables force pushes and branch deletion. Because the repository had one
+collaborator at the audit date, its solo-maintainer review policy sets required
+approvals to zero and does not require approval of the latest reviewable push;
+the maintainer can merge only after the eight automated checks and the other
+protection conditions pass. These automated gates do not constitute
+independent human peer review.
 
 ## Remaining limits
 
