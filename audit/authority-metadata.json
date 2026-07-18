@@ -3,11 +3,11 @@
   "schema_version": 1,
   "retrieved_at": "2026-07-18",
   "scope": {
-    "catalogue_rows": 59,
-    "unique_catalogue_dois": 49,
-    "auxiliary_reference_dois": 5,
-    "unique_tracked_dois": 54,
-    "structured_citation_records": 69,
+    "catalogue_rows": 66,
+    "unique_catalogue_dois": 54,
+    "auxiliary_reference_dois": 6,
+    "unique_tracked_dois": 60,
+    "structured_citation_records": 76,
     "standardization_rows": 12
   },
   "catalogue": {
@@ -920,6 +920,68 @@
         "authority_record_updated_at": "2024-10-18T17:30:57Z"
       },
       {
+        "doi": "10.1109/jsac.2025.3614025",
+        "doi_url": "https://doi.org/10.1109/jsac.2025.3614025",
+        "title": "Sensing With Communication Signals: From Information Theory to Signal Processing",
+        "authors": [
+          {
+            "given": "Fan",
+            "family": "Liu",
+            "display": "Fan Liu"
+          },
+          {
+            "given": "Ya-Feng",
+            "family": "Liu",
+            "display": "Ya-Feng Liu"
+          },
+          {
+            "given": "Yuanhao",
+            "family": "Cui",
+            "display": "Yuanhao Cui"
+          },
+          {
+            "given": "Christos",
+            "family": "Masouros",
+            "display": "Christos Masouros"
+          },
+          {
+            "given": "Jie",
+            "family": "Xu",
+            "display": "Jie Xu"
+          },
+          {
+            "given": "Tony",
+            "family": "Xiao Han",
+            "display": "Tony Xiao Han"
+          },
+          {
+            "given": "Stefano",
+            "family": "Buzzi",
+            "display": "Stefano Buzzi"
+          },
+          {
+            "given": "Yonina C.",
+            "family": "Eldar",
+            "display": "Yonina C. Eldar"
+          },
+          {
+            "given": "Shi",
+            "family": "Jin",
+            "display": "Shi Jin"
+          }
+        ],
+        "venue": "IEEE Journal on Selected Areas in Communications",
+        "year": 2026,
+        "volume": "44",
+        "issue": null,
+        "pages": "1-30",
+        "article_number": null,
+        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+        "source_type": "journal-article",
+        "source_url": "https://api.crossref.org/works/10.1109%2Fjsac.2025.3614025",
+        "authority_record_updated_at": "2026-02-11T20:56:22Z"
+      },
+      {
         "doi": "10.1109/jstsp.2021.3113120",
         "doi_url": "https://doi.org/10.1109/jstsp.2021.3113120",
         "title": "An Overview of Signal Processing Techniques for Joint Communication and Radar Sensing",
@@ -1012,6 +1074,58 @@
         "source_type": "journal-article",
         "source_url": "https://api.crossref.org/works/10.1109%2Fjstsp.2021.3118219",
         "authority_record_updated_at": "2022-05-10T14:52:43Z"
+      },
+      {
+        "doi": "10.1109/jstsp.2024.3405859",
+        "doi_url": "https://doi.org/10.1109/jstsp.2024.3405859",
+        "title": "Sensing-Assisted High Reliable Communication: A Transformer-Based Beamforming Approach",
+        "authors": [
+          {
+            "given": "Yuanhao",
+            "family": "Cui",
+            "display": "Yuanhao Cui"
+          },
+          {
+            "given": "Jiali",
+            "family": "Nie",
+            "display": "Jiali Nie"
+          },
+          {
+            "given": "Xiaowen",
+            "family": "Cao",
+            "display": "Xiaowen Cao"
+          },
+          {
+            "given": "Tiankuo",
+            "family": "Yu",
+            "display": "Tiankuo Yu"
+          },
+          {
+            "given": "Jiaqi",
+            "family": "Zou",
+            "display": "Jiaqi Zou"
+          },
+          {
+            "given": "Junsheng",
+            "family": "Mu",
+            "display": "Junsheng Mu"
+          },
+          {
+            "given": "Xiaojun",
+            "family": "Jing",
+            "display": "Xiaojun Jing"
+          }
+        ],
+        "venue": "IEEE Journal of Selected Topics in Signal Processing",
+        "year": 2024,
+        "volume": "18",
+        "issue": "5",
+        "pages": "782-795",
+        "article_number": null,
+        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+        "source_type": "journal-article",
+        "source_url": "https://api.crossref.org/works/10.1109%2Fjstsp.2024.3405859",
+        "authority_record_updated_at": "2025-02-06T18:40:24Z"
       },
       {
         "doi": "10.1109/lpt.2025.3649597",
@@ -1717,6 +1831,48 @@
         "authority_record_updated_at": "2024-12-05T06:11:01Z"
       },
       {
+        "doi": "10.1109/tmc.2025.3581616",
+        "doi_url": "https://doi.org/10.1109/tmc.2025.3581616",
+        "title": "Co-Design of Sensing, Communications, and Control for Low-Altitude Wireless Networks",
+        "authors": [
+          {
+            "given": "Haijia",
+            "family": "Jin",
+            "display": "Haijia Jin"
+          },
+          {
+            "given": "Jun",
+            "family": "Wu",
+            "display": "Jun Wu"
+          },
+          {
+            "given": "Weijie",
+            "family": "Yuan",
+            "display": "Weijie Yuan"
+          },
+          {
+            "given": "Fan",
+            "family": "Liu",
+            "display": "Fan Liu"
+          },
+          {
+            "given": "Yuanhao",
+            "family": "Cui",
+            "display": "Yuanhao Cui"
+          }
+        ],
+        "venue": "IEEE Transactions on Mobile Computing",
+        "year": 2025,
+        "volume": "24",
+        "issue": "11",
+        "pages": "12035-12048",
+        "article_number": null,
+        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+        "source_type": "journal-article",
+        "source_url": "https://api.crossref.org/works/10.1109%2Ftmc.2025.3581616",
+        "authority_record_updated_at": "2025-10-07T17:54:29Z"
+      },
+      {
         "doi": "10.1109/tmc.2026.3664359",
         "doi_url": "https://doi.org/10.1109/tmc.2026.3664359",
         "title": "Task-Oriented Integrated Sensing and Communication for Multidevice Cooperative Motion Recognition",
@@ -1762,6 +1918,58 @@
         "source_type": "journal-article",
         "source_url": "https://api.crossref.org/works/10.1109%2Ftmc.2026.3664359",
         "authority_record_updated_at": "2026-06-08T19:54:27Z"
+      },
+      {
+        "doi": "10.1109/tmc.2026.3674960",
+        "doi_url": "https://doi.org/10.1109/tmc.2026.3674960",
+        "title": "Joint Sensing, Communication, and Computation for Vertical Federated Edge Learning in Edge Perception Networks",
+        "authors": [
+          {
+            "given": "Xiaowen",
+            "family": "Cao",
+            "display": "Xiaowen Cao"
+          },
+          {
+            "given": "Dingzhu",
+            "family": "Wen",
+            "display": "Dingzhu Wen"
+          },
+          {
+            "given": "Suzhi",
+            "family": "Bi",
+            "display": "Suzhi Bi"
+          },
+          {
+            "given": "Yuanhao",
+            "family": "Cui",
+            "display": "Yuanhao Cui"
+          },
+          {
+            "given": "Guangxu",
+            "family": "Zhu",
+            "display": "Guangxu Zhu"
+          },
+          {
+            "given": "Han",
+            "family": "Hu",
+            "display": "Han Hu"
+          },
+          {
+            "given": "Yonina C.",
+            "family": "Eldar",
+            "display": "Yonina C. Eldar"
+          }
+        ],
+        "venue": "IEEE Transactions on Mobile Computing",
+        "year": 2026,
+        "volume": "25",
+        "issue": "8",
+        "pages": "12956-12970",
+        "article_number": null,
+        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+        "source_type": "journal-article",
+        "source_url": "https://api.crossref.org/works/10.1109%2Ftmc.2026.3674960",
+        "authority_record_updated_at": "2026-07-07T05:37:08Z"
       },
       {
         "doi": "10.1109/tsp.2020.2994394",
@@ -2245,6 +2453,58 @@
         "authority_record_updated_at": "2024-09-12T04:37:48Z"
       },
       {
+        "doi": "10.1109/twc.2025.3598997",
+        "doi_url": "https://doi.org/10.1109/twc.2025.3598997",
+        "title": "Integrated Sensing, Communication, and Computation for Over-the-Air Federated Edge Learning",
+        "authors": [
+          {
+            "given": "Dingzhu",
+            "family": "Wen",
+            "display": "Dingzhu Wen"
+          },
+          {
+            "given": "Sijing",
+            "family": "Xie",
+            "display": "Sijing Xie"
+          },
+          {
+            "given": "Xiaowen",
+            "family": "Cao",
+            "display": "Xiaowen Cao"
+          },
+          {
+            "given": "Yuanhao",
+            "family": "Cui",
+            "display": "Yuanhao Cui"
+          },
+          {
+            "given": "Jie",
+            "family": "Xu",
+            "display": "Jie Xu"
+          },
+          {
+            "given": "Yuanming",
+            "family": "Shi",
+            "display": "Yuanming Shi"
+          },
+          {
+            "given": "Shuguang",
+            "family": "Cui",
+            "display": "Shuguang Cui"
+          }
+        ],
+        "venue": "IEEE Transactions on Wireless Communications",
+        "year": 2026,
+        "volume": "25",
+        "issue": null,
+        "pages": "2748-2762",
+        "article_number": null,
+        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+        "source_type": "journal-article",
+        "source_url": "https://api.crossref.org/works/10.1109%2Ftwc.2025.3598997",
+        "authority_record_updated_at": "2026-01-12T22:09:21Z"
+      },
+      {
         "doi": "10.1364/jocn.584918",
         "doi_url": "https://doi.org/10.1364/jocn.584918",
         "title": "Integrated sensing and communication for optical transmission networks",
@@ -2342,7 +2602,7 @@
   },
   "auxiliary_references": {
     "authority": "Crossref REST API publisher-deposited metadata",
-    "scope_note": "Tracked DOI references outside the 59-row topical catalogue",
+    "scope_note": "Tracked DOI references outside the 66-row topical catalogue, including code citations and formal early access",
     "records": [
       {
         "doi": "10.1002/0471663085",
@@ -2439,6 +2699,53 @@
         "source_type": "journal-article",
         "source_url": "https://api.crossref.org/works/10.1109%2Fjsen.2022.3208272",
         "authority_record_updated_at": "2024-07-18T17:42:17Z"
+      },
+      {
+        "doi": "10.1109/jstsp.2026.3696543",
+        "doi_url": "https://doi.org/10.1109/jstsp.2026.3696543",
+        "title": "Simultaneous Sensing Data Acquisition and Sharing in Low-Altitude Wireless Networks: Fundamental Limits and Signaling Design",
+        "authors": [
+          {
+            "given": "Fuwang",
+            "family": "Dong",
+            "display": "Fuwang Dong"
+          },
+          {
+            "given": "Fan",
+            "family": "Liu",
+            "display": "Fan Liu"
+          },
+          {
+            "given": "Yifeng",
+            "family": "Xiong",
+            "display": "Yifeng Xiong"
+          },
+          {
+            "given": "Yuanhao",
+            "family": "Cui",
+            "display": "Yuanhao Cui"
+          },
+          {
+            "given": "Wei",
+            "family": "Wang",
+            "display": "Wei Wang"
+          },
+          {
+            "given": "Shi",
+            "family": "Jin",
+            "display": "Shi Jin"
+          }
+        ],
+        "venue": "IEEE Journal of Selected Topics in Signal Processing",
+        "year": 2026,
+        "volume": null,
+        "issue": null,
+        "pages": "1-15",
+        "article_number": null,
+        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+        "source_type": "journal-article",
+        "source_url": "https://api.crossref.org/works/10.1109%2Fjstsp.2026.3696543",
+        "authority_record_updated_at": "2026-05-25T19:54:10Z"
       },
       {
         "doi": "10.1109/tcomm.2024.3369696",

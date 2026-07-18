@@ -14,6 +14,7 @@ from scripts.verify_authority_metadata import (
     ROOT,
     SCHEMA_PATH,
     AuthorityMetadataError,
+    FORMAL_EARLY_ACCESS_DOI,
     compare_bibtex_records,
     compare_catalogue_rows,
     compare_cff_preferred_citation,
@@ -50,8 +51,8 @@ def test_every_catalogue_row_matches_frozen_crossref_metadata() -> None:
     rows = parse_catalogue_rows()
 
     compare_catalogue_rows(rows, manifest)
-    assert len(rows) == 59
-    assert len({row.doi for row in rows}) == 49
+    assert len(rows) == 66
+    assert len({row.doi for row in rows}) == 54
 
 
 def test_all_tracked_bibtex_and_cff_records_match_authority() -> None:
@@ -61,8 +62,8 @@ def test_all_tracked_bibtex_and_cff_records_match_authority() -> None:
     compare_bibtex_records(records, manifest)
     compare_cff_preferred_citation(manifest)
     assert len(records) == 9
-    assert manifest["scope"]["unique_tracked_dois"] == 54
-    assert manifest["scope"]["structured_citation_records"] == 59 + 9 + 1
+    assert manifest["scope"]["unique_tracked_dois"] == 60
+    assert manifest["scope"]["structured_citation_records"] == 66 + 9 + 1
 
 
 def test_standardization_table_matches_official_record_snapshot() -> None:
@@ -71,6 +72,45 @@ def test_standardization_table_matches_official_record_snapshot() -> None:
 
     compare_standard_rows(rows, manifest)
     assert len(rows) == 12
+
+
+def test_formal_early_access_record_is_frozen_and_disclosed() -> None:
+    manifest = load_manifest()
+    record = next(
+        record
+        for record in manifest["auxiliary_references"]["records"]
+        if record["doi"] == FORMAL_EARLY_ACCESS_DOI
+    )
+    assert record["title"] == (
+        "Simultaneous Sensing Data Acquisition and Sharing in Low-Altitude "
+        "Wireless Networks: Fundamental Limits and Signaling Design"
+    )
+    assert [author["display"] for author in record["authors"]] == [
+        "Fuwang Dong",
+        "Fan Liu",
+        "Yifeng Xiong",
+        "Yuanhao Cui",
+        "Wei Wang",
+        "Shi Jin",
+    ]
+    assert record["venue"] == "IEEE Journal of Selected Topics in Signal Processing"
+    assert record["year"] == 2026
+    assert record["volume"] is None
+    assert record["issue"] is None
+    assert record["pages"] == "1-15"
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert (
+        f"[{record['title']}]({record['doi_url']}) | "
+        "IEEE JSTSP (Early Access) | 2026 |"
+    ).casefold() in readme.casefold()
+    network = (ROOT / "paper" / "network.md").read_text(encoding="utf-8")
+    expected_network_record = (
+        f"[{record['title']}]({record['doi_url']}) — {record['venue']}, "
+        f"pp. {record['pages'].replace('-', '–')}, {record['year']}."
+    )
+    assert expected_network_record.casefold() in network.casefold()
+    assert "had not deposited a volume or issue" in network
 
 
 def test_markdown_discloses_snapshot_cutoff() -> None:
@@ -126,44 +166,45 @@ def test_offline_verifier_emits_hash_bound_evidence(tmp_path: Path) -> None:
     assert summary["snapshot"]["path"] == str(MANIFEST_PATH.relative_to(ROOT))
     assert len(summary["snapshot"]["sha256"]) == 64
     assert summary["catalogue"]["complete_required_fields"] == {
-        "doi": 49,
-        "title": 49,
-        "authors": 49,
-        "venue": 49,
-        "year": 49,
-        "volume": 49,
+        "doi": 54,
+        "title": 54,
+        "authors": 54,
+        "venue": 54,
+        "year": 54,
+        "volume": 54,
     }
     assert summary["catalogue"]["optional_field_coverage"] == {
-        "issue": 46,
-        "pages": 47,
+        "issue": 49,
+        "pages": 52,
         "article_number": 2,
     }
     assert summary["auxiliary_references"] == {
-        "unique_dois": 5,
-        "source_types": {"journal-article": 4, "monograph": 1},
+        "unique_dois": 6,
+        "formal_early_access_dois": 1,
+        "source_types": {"journal-article": 5, "monograph": 1},
     }
-    assert summary["tracked_dois"] == 54
+    assert summary["tracked_dois"] == 60
     assert summary["structured_citation_records"] == {
-        "catalogue_rows": 59,
+        "catalogue_rows": 66,
         "bibtex_records": 9,
         "cff_preferred_citations": 1,
-        "total": 69,
+        "total": 76,
         "exact_core_metadata_matches": {
-            "doi": 69,
-            "title": 69,
-            "authors": 69,
-            "venue_or_publisher": 69,
-            "year": 69,
+            "doi": 76,
+            "title": 76,
+            "authors": 76,
+            "venue_or_publisher": 76,
+            "year": 76,
         },
         "exact_optional_field_matches": {
-            "volume": 68,
-            "issue": 61,
-            "pages": 65,
+            "volume": 75,
+            "issue": 66,
+            "pages": 72,
             "article_number": 3,
         },
     }
     assert summary["standardization"]["rows"] == 12
-    assert summary["authority_url_syntax_checks"] == 121
+    assert summary["authority_url_syntax_checks"] == 133
 
     # Keep the test's temporary output local while exercising JSON serialization.
     evidence = tmp_path / "authority-metadata-audit.json"

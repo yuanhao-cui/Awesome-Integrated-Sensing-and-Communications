@@ -22,6 +22,7 @@
 
 | Publication | Authors in publication order | Bibliographic record | Signal family |
 |---|---|---|---|
+| [Sensing-Assisted High Reliable Communication: A Transformer-Based Beamforming Approach](https://doi.org/10.1109/JSTSP.2024.3405859) | Yuanhao Cui; Jiali Nie; Xiaowen Cao; Tiankuo Yu; Jiaqi Zou; Junsheng Mu; Xiaojun Jing | IEEE Journal of Selected Topics in Signal Processing, vol. 18, no. 5, pp. 782–795, 2024 | Sensing-assisted transformer beamforming |
 | [Cramér-Rao Bound Optimization for Joint Radar-Communication Beamforming](https://doi.org/10.1109/TSP.2021.3135692) | Fan Liu; Ya-Feng Liu; Ang Li; Christos Masouros; Yonina C. Eldar | IEEE Transactions on Signal Processing, vol. 70, pp. 240–253, 2022 | Multi-antenna waveform and covariance design |
 
 ## Scope note

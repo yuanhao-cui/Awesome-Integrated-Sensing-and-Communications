@@ -35,19 +35,19 @@
       ],
       "properties": {
         "catalogue_rows": {
-          "const": 59
+          "const": 66
         },
         "unique_catalogue_dois": {
-          "const": 49
-        },
-        "auxiliary_reference_dois": {
-          "const": 5
-        },
-        "unique_tracked_dois": {
           "const": 54
         },
+        "auxiliary_reference_dois": {
+          "const": 6
+        },
+        "unique_tracked_dois": {
+          "const": 60
+        },
         "structured_citation_records": {
-          "const": 69
+          "const": 76
         },
         "standardization_rows": {
           "const": 12
@@ -76,8 +76,8 @@
         },
         "records": {
           "type": "array",
-          "minItems": 49,
-          "maxItems": 49,
+          "minItems": 54,
+          "maxItems": 54,
           "items": {
             "$ref": "#/$defs/catalogue_record"
           }
@@ -97,12 +97,12 @@
           "const": "Crossref REST API publisher-deposited metadata"
         },
         "scope_note": {
-          "const": "Tracked DOI references outside the 59-row topical catalogue"
+          "const": "Tracked DOI references outside the 66-row topical catalogue, including code citations and formal early access"
         },
         "records": {
           "type": "array",
-          "minItems": 5,
-          "maxItems": 5,
+          "minItems": 6,
+          "maxItems": 6,
           "items": {
             "$ref": "#/$defs/catalogue_record"
           }

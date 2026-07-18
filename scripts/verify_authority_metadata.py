@@ -46,6 +46,7 @@ BIBLIOGRAPHIC_RECORD = re.compile(
     r"(?P<year>[0-9]{4})$"
 )
 DOI = re.compile(r"^10\.[0-9]{4,9}/[-._;()/:a-z0-9]+$")
+FORMAL_EARLY_ACCESS_DOI = "10.1109/jstsp.2026.3696543"
 ALLOWED_STANDARD_DOMAINS = {
     "IEEE": {"standards.ieee.org", "www.ieee802.org"},
     "3GPP": {"portal.3gpp.org"},
@@ -398,11 +399,11 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
 
     scope = manifest.get("scope", {})
     expected_scope = {
-        "catalogue_rows": 59,
-        "unique_catalogue_dois": 49,
-        "auxiliary_reference_dois": 5,
-        "unique_tracked_dois": 54,
-        "structured_citation_records": 69,
+        "catalogue_rows": 66,
+        "unique_catalogue_dois": 54,
+        "auxiliary_reference_dois": 6,
+        "unique_tracked_dois": 60,
+        "structured_citation_records": 76,
         "standardization_rows": 12,
     }
     if scope != expected_scope:
@@ -425,8 +426,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     _https_url(authority_url, label="Crossref authority_url")
 
     records = manifest["catalogue"].get("records", [])
-    if len(records) != 49:
-        raise AuthorityMetadataError(f"expected 49 DOI records, found {len(records)}")
+    if len(records) != 54:
+        raise AuthorityMetadataError(f"expected 54 DOI records, found {len(records)}")
     dois = [record.get("doi") for record in records]
     if dois != sorted(dois) or len(dois) != len(set(dois)):
         raise AuthorityMetadataError("catalogue DOI records must be unique and sorted")
@@ -438,9 +439,9 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         )
 
     auxiliary = manifest["auxiliary_references"].get("records", [])
-    if len(auxiliary) != 5:
+    if len(auxiliary) != 6:
         raise AuthorityMetadataError(
-            f"expected 5 auxiliary DOI records, found {len(auxiliary)}"
+            f"expected 6 auxiliary DOI records, found {len(auxiliary)}"
         )
     auxiliary_dois = [record.get("doi") for record in auxiliary]
     if auxiliary_dois != sorted(auxiliary_dois) or len(auxiliary_dois) != len(
@@ -449,8 +450,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise AuthorityMetadataError("auxiliary DOI records must be unique and sorted")
     if set(dois) & set(auxiliary_dois):
         raise AuthorityMetadataError("catalogue and auxiliary DOI sets must be disjoint")
-    if len(set(dois) | set(auxiliary_dois)) != 54:
-        raise AuthorityMetadataError("tracked authority snapshot must contain 54 DOIs")
+    if len(set(dois) | set(auxiliary_dois)) != 60:
+        raise AuthorityMetadataError("tracked authority snapshot must contain 60 DOIs")
     for record in auxiliary:
         _validate_crossref_record(
             record,
@@ -459,6 +460,22 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         )
     if sum(record["source_type"] == "monograph" for record in auxiliary) != 1:
         raise AuthorityMetadataError("auxiliary snapshot must contain one monograph")
+    early_access = next(
+        (record for record in auxiliary if record["doi"] == FORMAL_EARLY_ACCESS_DOI),
+        None,
+    )
+    if early_access is None:
+        raise AuthorityMetadataError("formal early-access DOI is absent from authority snapshot")
+    if (
+        early_access["source_type"] != "journal-article"
+        or early_access["volume"] is not None
+        or early_access["issue"] is not None
+        or early_access["pages"] is None
+    ):
+        raise AuthorityMetadataError(
+            "formal early-access record must be a paginated journal article "
+            "without a deposited volume or issue"
+        )
 
     standards = manifest["standardization"].get("records", [])
     if len(standards) != 12:
@@ -562,6 +579,7 @@ def compare_bibtex_records(
         *(
             record["doi"]
             for record in manifest["auxiliary_references"]["records"]
+            if record["doi"] != FORMAL_EARLY_ACCESS_DOI
         ),
         "10.1109/comst.2026.3655674",
         "10.1109/jsac.2022.3156632",
@@ -740,6 +758,9 @@ def verify(root: Path = ROOT, manifest_path: Path = MANIFEST_PATH) -> dict[str, 
         },
         "auxiliary_references": {
             "unique_dois": len(auxiliary),
+            "formal_early_access_dois": sum(
+                record["doi"] == FORMAL_EARLY_ACCESS_DOI for record in auxiliary
+            ),
             "source_types": {
                 source_type: sum(
                     record["source_type"] == source_type for record in auxiliary

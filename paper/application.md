@@ -6,6 +6,7 @@
 
 | Publication | Authors in publication order | Bibliographic record | Application context |
 |---|---|---|---|
+| [Co-Design of Sensing, Communications, and Control for Low-Altitude Wireless Networks](https://doi.org/10.1109/TMC.2025.3581616) | Haijia Jin; Jun Wu; Weijie Yuan; Fan Liu; Yuanhao Cui | IEEE Transactions on Mobile Computing, vol. 24, no. 11, pp. 12035–12048, 2025 | Low-altitude sensing, communication, and control co-design |
 | [UAV Meets Integrated Sensing and Communication: Challenges and Future Directions](https://doi.org/10.1109/MCOM.008.2200510) | Junsheng Mu; Ronghui Zhang; Yuanhao Cui; Ning Gao; Xiaojun Jing | IEEE Communications Magazine, vol. 61, no. 5, pp. 62–67, 2023 | UAV-enabled ISAC |
 | [Joint Maneuver and Beamforming Design for UAV-Enabled Integrated Sensing and Communication](https://doi.org/10.1109/TWC.2022.3211533) | Zhonghao Lyu; Guangxu Zhu; Jie Xu | IEEE Transactions on Wireless Communications, vol. 22, no. 4, pp. 2424–2440, 2023 | Coupled UAV trajectory and beamforming design |
 | [IRS-UAV Assisted Secure Integrated Sensing and Communication](https://doi.org/10.1109/MWC.013.2300252) | Jinlei Xu; Xianglin Yu; Lexi Xu; Chengwen Xing; Nan Zhao; Xianbin Wang; Dusit Niyato | IEEE Wireless Communications, vol. 31, no. 5, pp. 61–67, 2024 | IRS-assisted secure UAV ISAC |
