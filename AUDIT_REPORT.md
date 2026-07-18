@@ -10,8 +10,12 @@
 
 The initial repository was not a defensible academic bibliography or reproduction suite. It reused IEEE document URLs for unrelated titles, sent many entries to Google Scholar searches, contained incorrect author/venue/year/DOI records, presented study or draft activity as standards completion, overstated dataset attributes, and treated passing software tests or similar-looking plots as paper reproduction.
 
-The content has therefore been reduced to a smaller, auditable index rather than preserving unverified breadth:
+The audit now separates a rich, navigable homepage from the smaller
+machine-frozen topical catalogue instead of replacing the original homepage
+with a short summary:
 
+- the original six-part, 44-entry Featured Papers layout is retained after
+  correcting identifiers, titles, authors, venues, years, and claim boundaries;
 - 59 publication rows across nine topical files, representing 49 unique DOI-linked works; cross-listed works use the same DOI and metadata.
 - 12 standards/pre-standardization rows linked to official IEEE, 3GPP, ITU-R,
   or ETSI records and labeled by maturity.
@@ -21,7 +25,9 @@ The content has therefore been reduced to a smaller, auditable index rather than
 - conservative dataset and tool directories with source and licensing boundaries;
 - no claim that a cross-method leaderboard exists.
 
-The lists are deliberately non-exhaustive. Accuracy and traceability take precedence over item count.
+The lists are deliberately non-exhaustive. Preserving useful organization and
+information density does not justify retaining a false identifier, unsupported
+number, or overstated evidence level.
 
 ## Audit method
 
@@ -62,7 +68,9 @@ The initial independent scans reported:
 
 The obsolete link_check_report.md was removed so that this report is the single audit record.
 
-The final DOI audit found 109 DOI occurrences and 54 unique DOI records.
+The final machine-structured DOI audit found 109 DOI occurrences and 54 unique
+DOI records across the topical catalogue, code citations, and preferred
+citation scope.
 Crossref registered all 54. Every DOI had title evidence, with no unregistered
 DOI, identifier–title conflict, or title mismatch after identifier-only labels
 were excluded. Across 69 complete structured citation records (59 catalogue
@@ -73,8 +81,8 @@ article number 3/3. The only normalized-name exceptions were publication
 bylines that retain initials used by the publications; every structured field
 uses the complete publisher-deposited display name and publication order.
 
-All 54 unique DOI-linked works are now frozen in the version-controlled
-[authority metadata snapshot](audit/authority-metadata.json), with a separate
+All 54 DOI-linked works in that machine-structured scope are frozen in the
+version-controlled [authority metadata snapshot](audit/authority-metadata.json), with a separate
 [JSON Schema](audit/authority-metadata.schema.json). The compact Crossref
 snapshot records canonical DOI, exact title, complete deposited author order,
 venue, year, volume, and, where deposited, issue, pages, or article number. Its
@@ -85,6 +93,25 @@ article numbers. A separate auxiliary-reference section covers the remaining
 five works cited by the code baselines: four journal articles and one
 monograph. Each record retains its exact Crossref API source URL, publisher,
 source type, deposit-update timestamp, and the 2026-07-18 retrieval date.
+
+### Homepage preservation review
+
+The restored homepage keeps the original 44 Featured Papers rows and six
+subsections. Nineteen rows overlap the machine-frozen topical catalogue. The
+preservation review found 24 additional formal DOI records that had been removed
+during the first compression pass and restored them with canonical DOI links;
+one remaining item is explicitly labeled as an arXiv preprint rather than being
+assigned an unsupported journal venue. A deterministic catalogue test fixes the
+six subsection row counts at 7/9/6/8/8/6 and rejects noncanonical scholarly
+links, Google Scholar discovery URLs, and placeholder titles.
+
+The 24 restored formal records are not silently counted as part of the 59-row,
+49-work machine-frozen topical catalogue. Promoting them into `paper/*.md` would
+require a reviewed authority-snapshot refresh and matching verifier-count
+update. The ACM DOI for Penetrative AI is retained as the canonical identifier;
+its landing-page WAF is covered by one exact Lychee exclusion, while the
+[exact Crossref record](https://api.crossref.org/works/10.1145%2F3638550.3641130)
+remains in the live-link input set.
 
 Standards evidence is deliberately not represented as Crossref data. The same
 snapshot contains a separate 12-record official-source section with identifier,
@@ -101,13 +128,13 @@ gate does not claim to re-query Crossref or standards sites during CI;
 refreshes are explicit review events, while the independent Lychee job remains
 the live URL reachability gate.
 
-The deterministic Markdown audit scanned 28 files and 248 references (119
-unique external URLs), with zero malformed destinations, missing local targets,
-placeholder destinations, or missing fragments. The independent Lychee 0.24.2
-audit checked 385 destinations (277 unique): 381 succeeded, zero failed, and
-four exact URLs used documented narrow exclusions for a bot-blocked or
-non-HTML authority endpoint. Redirect counts are intentionally omitted because
-they vary with live server behavior.
+The deterministic Markdown audit is rerun after every documentation change and
+records the current file/reference totals in Gate 2. It requires zero malformed
+destinations, missing local targets, placeholder destinations, or missing
+fragments. The independent Lychee 0.24.2 audit checks the broader tracked URL
+surface and permits only exact, documented exclusions for a bot-blocked or
+non-HTML authority endpoint. Redirect counts are treated as live observations
+because they vary with server behavior.
 
 ## High-impact factual corrections
 
@@ -186,12 +213,13 @@ defined frame-length symbol is `L`) and a `P0` difference between the accepted
 institutional manuscript and the arXiv source. The baseline records both rather
 than silently selecting a version.
 
-The aggregate single-process coverage hard gate is 70%. The final locked
-Python 3.12 run measured 85.05% statement coverage (3,739 of 4,396 statements)
-with 664/664 tests passing. Locked Python 3.10 and 3.11 environments
-independently passed the same 664-test suite. This replaces the unsupported
-claim that every baseline had at least 80% coverage; new or modified code must
-still add targeted tests rather than relying on the aggregate percentage.
+The aggregate single-process coverage hard gate is 70%. The current
+homepage-preservation revision passed 665/665 strict tests in the locked Python
+3.12 environment and measured 85.05% statement coverage (3,739 of 4,396
+statements). The protected workflow independently repeats the current tree on
+Python 3.10, 3.11, and 3.12 before merge. This replaces the unsupported claim
+that every baseline had at least 80% coverage; new or modified code must still
+add targeted tests rather than relying on the aggregate percentage.
 
 The seven machine-readable baseline certificates contain 99 declared
 checks and passed on all three Python versions. A separate read-only numerical
@@ -219,8 +247,8 @@ Inclusion means that a formal record existed by 2026-07-18, not that the work is
 
 | Gate | Pass criteria | Audited-tree result |
 |---|---|---|
-| Gate 1 — software and simulation integrity | Exact direct dependencies; Python 3.10–3.12 CI matrix; warning-free compilation and tests; valid CFF/YAML; seven machine-readable JSON certificates; aggregate single-process coverage at least 70%; numerical paper-value comparison whenever exact reproduction is claimed | **PASS locally.** No-cache locked Python 3.10.20 and locked Python 3.11.15/3.12.13 environments each passed 664/664 strict tests and all seven certificates (99/99 checks). The covered Python 3.12 run measured 85.05% (3,739/4,396 statements). Dependency audit, install consistency, CFF 1.2/YAML validation, Ruff, YAML lint, compilation, and whitespace checks all passed; compilation and tests were warning-free. The final uv refresh emitted one non-fatal normalization warning for an upstream package's legacy version specifier, without lock drift or install inconsistency. The workflow repeats the covered run on Python 3.10, 3.11, and 3.12 and separately performs no-cache macOS arm64 installs for all three versions. |
-| Gate 2 — scholarly content and link integrity | Canonical identifiers; exact metadata; no title/identifier collisions; official standards records and maturity; evidence-bounded descriptions; no unsupported reproduction claims; no malformed or broken tracked links; narrowly documented exact endpoint exclusions | **PASS locally.** The reviewed snapshot covers 54/54 DOI authorities, all 69 structured citation records, and 12 official standards records; its SHA-256 is `3e34b11ebaa31778093d6e76f259e497afd75f2c7c732fe284d46d29f14028a0`. The deterministic audit found zero failures across 28 Markdown files, 248 references, and 119 unique external URLs. Independent Lychee checked 385 destinations (277 unique): 381 succeeded, zero failed, and four exact documented exclusions were applied. |
+| Gate 1 — software and simulation integrity | Exact direct dependencies; Python 3.10–3.12 CI matrix; warning-free compilation and tests; valid CFF/YAML; seven machine-readable JSON certificates; aggregate single-process coverage at least 70%; numerical paper-value comparison whenever exact reproduction is claimed | **PASS locally.** The current locked Python 3.12.13 environment passed 665/665 strict tests and all seven certificates (99/99 checks). The covered run measured 85.05% (3,739/4,396 statements). Dependency audit, install consistency, CFF 1.2/YAML validation, Ruff, YAML lint, compilation, and whitespace checks passed; compilation and tests were warning-free. The protected workflow repeats the current tree on Python 3.10, 3.11, and 3.12 and separately performs no-cache macOS arm64 installs for all three versions before merge. |
+| Gate 2 — scholarly content and link integrity | Canonical identifiers; exact metadata; no title/identifier collisions; official standards records and maturity; evidence-bounded descriptions; no unsupported reproduction claims; no malformed or broken tracked links; narrowly documented exact endpoint exclusions | **PASS locally.** The reviewed snapshot covers 54/54 DOI authorities, all 69 structured citation records, and 12 official standards records; its SHA-256 is `3e34b11ebaa31778093d6e76f259e497afd75f2c7c732fe284d46d29f14028a0`. The deterministic audit found zero failures across 28 Markdown files, 361 references, and 155 unique external URLs. Independent Lychee checked 498 link occurrences (332 unique): 492 succeeded, zero failed, and six excluded occurrences matched five exact documented endpoints. |
 
 Passing one gate does not compensate for failing the other. Repository policy
 requires both workflows to pass before merge; each uploads machine-readable

@@ -23,3 +23,9 @@ exceptions:
       The canonical DOI resolves correctly, but its Wiley landing page returns
       HTTP 403 to Lychee. The same record's exact Crossref API URL remains in
       the authority snapshot and is checked by the live-link gate.
+  - url: https://doi.org/10.1145/3638550.3641130
+    lychee_pattern: '^https://doi\.org/10\.1145/3638550\.3641130$'
+    reason: >-
+      The canonical DOI resolves to the ACM Digital Library, whose WAF returns
+      HTTP 403 to Lychee. The exact Crossref API record is linked from the audit
+      report and remains covered by the live-link gate.
