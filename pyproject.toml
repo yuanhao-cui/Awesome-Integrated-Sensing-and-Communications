@@ -18,7 +18,7 @@ ci = [
   "numpy==1.26.4",
   "scipy==1.13.1",
   "matplotlib==3.10.9",
-  "cvxpy==1.6.5",
+  "cvxpy==1.7.5",
   "scikit-learn==1.5.2",
   "torch==2.5.1",
   "ruff==0.9.10",
