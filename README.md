@@ -3,7 +3,7 @@
 [![Awesome](https://awesome.re/badge.svg)](https://awesome.re)
 [![Paper](https://img.shields.io/badge/Paper-IEEE%20COMST%202026-blue?logo=ieee)](https://doi.org/10.1109/COMST.2026.3655674)
 [![arXiv](https://img.shields.io/badge/arXiv-2504.06830-b31b1b?logo=arxiv)](https://arxiv.org/abs/2504.06830)
-[![Featured](https://img.shields.io/badge/Featured-44-orange)](#-featured-papers)
+[![Featured](https://img.shields.io/badge/Featured-53-orange)](#-featured-papers)
 [![Datasets](https://img.shields.io/badge/Datasets-11-purple)](#-datasets--benchmarks)
 [![Tools](https://img.shields.io/badge/Tools-10-green)](#-open-source-and-research-tools)
 [![Baselines](https://img.shields.io/badge/Baselines-7-2ea44f)](#-reproducible-baselines--evidence-graded)
@@ -245,106 +245,128 @@ status can change and must be rechecked before downstream reliance.
 
 ## ⭐ Featured Papers
 
-The **44-entry layout from the original homepage is retained**. Nineteen entries
-are also present in the machine-frozen topical catalogue; 24 additional entries
-were restored after title-level Crossref/DOI verification; one item is explicitly
-identified as a preprint. This featured view is not a completeness or citation
-ranking claim.
+The original **six-section layout and all 44 entries are retained**. This
+53-entry view adds nine DOI-linked records: four established surveys spanning
+fundamental limits, mobile networks, signal design, and cell-free networks,
+plus five selected recent papers. Twenty-seven entries are also present in the
+machine-frozen topical catalogue; 24 additional formal records were restored
+after title-level Crossref/DOI verification, one formal early-access record is
+kept outside the volume-complete catalogue, and one item is explicitly
+identified as a preprint.
+
+Within each section, a version of record is preferred to a preprint; ordering
+then considers direct ISAC relevance, breadth or technical contribution, venue
+standing in the corresponding subfield, publication completeness, and recency
+as a tie-breaker. A targeted review of the maintainer's recent publications
+used these same criteria: no author receives a dedicated section or special
+styling, and overlapping, preprint-only, editorial, or out-of-scope work is not
+promoted solely because of authorship. Dynamic citation counts are not used.
+The sections cover different research questions, so position is not a universal
+cross-topic quality ranking.
 
 ### 🔥 Landmark Surveys
 
 | Paper | Authors | Venue | Year |
 |---|---|---|---|
 | [Integrated Sensing and Communications Over the Years: An Evolution Perspective](https://doi.org/10.1109/COMST.2026.3655674) | Di Zhang; Yuanhao Cui; Xiaowen Cao; Nanchi Su; Yi Gong; Fan Liu; Weijie Yuan; Xiaojun Jing; J. Andrew Zhang; Jie Xu; Christos Masouros; Dusit Niyato; Marco Di Renzo | IEEE COMST | 2026 |
-| [A Survey on Wi-Fi Sensing Generalizability: Taxonomy, Techniques, Datasets, and Future Research Prospects](https://doi.org/10.1109/COMST.2026.3670854) | Fei Wang; Tingting Zhang; Wei Xi; Han Ding; Ge Wang; Di Zhang; Yuanhao Cui; Fan Liu; Jinsong Han; Jie Xu; Tony Xiao Han | IEEE COMST | 2026 |
+| [A Survey on Fundamental Limits of Integrated Sensing and Communication](https://doi.org/10.1109/COMST.2022.3149272) | An Liu; Zhe Huang; Min Li; Yubo Wan; Wenrui Li; Tony Xiao Han; Chenchen Liu; Rui Du; Danny Kai Pin Tan; Jianmin Lu; Yuan Shen; Fabiola Colone; Kevin Chetty | IEEE COMST | 2022 |
+| [Sensing With Communication Signals: From Information Theory to Signal Processing](https://doi.org/10.1109/JSAC.2025.3614025) | Fan Liu; Ya-Feng Liu; Yuanhao Cui; Christos Masouros; Jie Xu; Tony Xiao Han; Stefano Buzzi; Yonina C. Eldar; Shi Jin | IEEE JSAC | 2026 |
 | [Integrated Sensing and Communications: Toward Dual-Functional Wireless Networks for 6G and Beyond](https://doi.org/10.1109/JSAC.2022.3156632) | Fan Liu; Yuanhao Cui; Christos Masouros; Jie Xu; Tony Xiao Han; Yonina C. Eldar; Stefano Buzzi | IEEE JSAC | 2022 |
-| [Integrated Sensing and Communication: Towards Multifunctional Perceptive Network](https://arxiv.org/abs/2510.14358) | Yuanhao Cui; Jiali Nie; Fan Liu; Weijie Yuan; Zhiyong Feng; Xiaojun Jing; Yulin Liu; Jie Xu; Christos Masouros; Shuguang Cui | arXiv preprint | 2025 |
+| [Enabling Joint Communication and Radar Sensing in Mobile Networks—A Survey](https://doi.org/10.1109/COMST.2021.3122519) | J. Andrew Zhang; Md. Lushanur Rahman; Kai Wu; Xiaojing Huang; Y. Jay Guo; Shanzhi Chen; Jinhong Yuan | IEEE COMST | 2022 |
+| [A Survey on Wi-Fi Sensing Generalizability: Taxonomy, Techniques, Datasets, and Future Research Prospects](https://doi.org/10.1109/COMST.2026.3670854) | Fei Wang; Tingting Zhang; Wei Xi; Han Ding; Ge Wang; Di Zhang; Yuanhao Cui; Fan Liu; Jinsong Han; Jie Xu; Tony Xiao Han | IEEE COMST | 2026 |
 | [Seventy Years of Radar and Communications: The road from separation to integration](https://doi.org/10.1109/MSP.2023.3272881) | Fan Liu; Le Zheng; Yuanhao Cui; Christos Masouros; Athina P. Petropulu; Hugh Griffiths; Yonina C. Eldar | IEEE SPM | 2023 |
 | [An Overview of Signal Processing Techniques for Joint Communication and Radar Sensing](https://doi.org/10.1109/JSTSP.2021.3113120) | J. Andrew Zhang; Fan Liu; Christos Masouros; Robert W. Heath; Zhiyong Feng; Le Zheng; Athina Petropulu | IEEE JSTSP | 2021 |
 | [Joint Radar and Communication Design: Applications, State-of-the-Art, and the Road Ahead](https://doi.org/10.1109/TCOMM.2020.2973976) | Fan Liu; Christos Masouros; Athina P. Petropulu; Hugh Griffiths; Lajos Hanzo | IEEE TCOM | 2020 |
+| [Integrated Sensing and Communication Signals Toward 5G-A and 6G: A Survey](https://doi.org/10.1109/JIOT.2023.3235618) | Zhiqing Wei; Hanyang Qu; Yuan Wang; Xin Yuan; Huici Wu; Ying Du; Kaifeng Han; Ning Zhang; Zhiyong Feng | IEEE IoT-J | 2023 |
+| [Toward 6G Networks: A Survey on Integrated Sensing and Communication in Cell-Free Massive MIMO](https://doi.org/10.1109/JIOT.2026.3693228) | Manzoor Ahmed; Ali Arshad Nasir; Mudassir Masood; Kamran Ali Memon; Khurram Karim Qureshi; Feroz Khan; Touseef Hussain; Wali Ullah Khan; Fang Xu; Zhu Han | IEEE IoT-J | 2026 |
+| [Integrated Sensing and Communication: Towards Multifunctional Perceptive Network](https://arxiv.org/abs/2510.14358) | Yuanhao Cui; Jiali Nie; Fan Liu; Weijie Yuan; Zhiyong Feng; Xiaojun Jing; Yulin Liu; Jie Xu; Christos Masouros; Shuguang Cui | arXiv preprint | 2025 |
 
 ### 📡 RF ISAC — Antenna & Waveform
 
 | Paper | Venue | Year | Key contribution or scope |
 |---|---|---|---|
-| [Fixed and Movable Antenna Technology for 6G Integrated Sensing and Communication](https://doi.org/10.16798/j.issn.1003-0530.2024.08.001) | Journal of Signal Processing | 2024 | Fixed, distributed, and movable antenna architectures for ISAC |
-| [Smart Radio Environments Empowered by Reconfigurable Intelligent Surfaces: How It Works, State of Research, and The Road Ahead](https://doi.org/10.1109/JSAC.2020.3007211) | IEEE JSAC | 2020 | Enabling RIS background; not itself an ISAC-specific result |
+| [Integrated sensing and communication based on space-time-coding metasurfaces](https://doi.org/10.1038/S41467-025-57137-6) | Nature Communications | 2025 | Space-time-coding metasurface architecture |
+| [MIMO-OFDM ISAC Waveform Design for Range-Doppler Sidelobe Suppression](https://doi.org/10.1109/TWC.2024.3503605) | IEEE TWC | 2025 | Range-Doppler sidelobe-aware waveform design |
+| [On the Effectiveness of OTFS for Joint Radar Parameter Estimation and Communication](https://doi.org/10.1109/TWC.2020.2998583) | IEEE TWC | 2020 | Delay-Doppler-domain parameter estimation and communication |
 | [RIS-Aided Integrated Sensing and Communication: Joint Beamforming and Reflection Design](https://doi.org/10.1109/TVT.2023.3248657) | IEEE TVT | 2023 | Joint active beamforming and RIS reflection design |
 | [Multi-user ISAC through Stacked Intelligent Metasurfaces: New Algorithms and Experiments](https://doi.org/10.1109/GLOBECOM52923.2024.10901440) | IEEE GLOBECOM | 2024 | Stacked-metasurface multi-user algorithms and experiments |
-| [Integrated sensing and communication based on space-time-coding metasurfaces](https://doi.org/10.1038/S41467-025-57137-6) | Nature Communications | 2025 | Space-time-coding metasurface architecture |
+| [Fixed and Movable Antenna Technology for 6G Integrated Sensing and Communication](https://doi.org/10.16798/j.issn.1003-0530.2024.08.001) | Journal of Signal Processing | 2024 | Fixed, distributed, and movable antenna architectures for ISAC |
 | [Sparse MIMO for ISAC: New Opportunities and Challenges](https://doi.org/10.1109/MWC.001.2400201) | IEEE Wireless Communications | 2025 | Sparse-array opportunities and design challenges for ISAC |
-| [On the Effectiveness of OTFS for Joint Radar Parameter Estimation and Communication](https://doi.org/10.1109/TWC.2020.2998583) | IEEE TWC | 2020 | Delay-Doppler-domain parameter estimation and communication |
 | [From OTFS to DD-ISAC: Integrating Sensing and Communications in the Delay Doppler Domain](https://doi.org/10.1109/MWC.018.2300607) | IEEE Wireless Communications | 2024 | Delay-Doppler-domain ISAC overview |
-| [MIMO-OFDM ISAC Waveform Design for Range-Doppler Sidelobe Suppression](https://doi.org/10.1109/TWC.2024.3503605) | IEEE TWC | 2025 | Range-Doppler sidelobe-aware waveform design |
+| [Smart Radio Environments Empowered by Reconfigurable Intelligent Surfaces: How It Works, State of Research, and The Road Ahead](https://doi.org/10.1109/JSAC.2020.3007211) | IEEE JSAC | 2020 | Enabling RIS background; not itself an ISAC-specific result |
 
 ### 🔦 Optical ISAC
 
 | Paper | Venue | Year | Key contribution or scope |
 |---|---|---|---|
-| [Optical Integrated Sensing and Communication: Architectures, Potentials and Challenges](https://doi.org/10.1109/IOTM.001.2300196) | IEEE Internet of Things Magazine | 2024 | Optical ISAC architectures, potentials, and challenges |
-| [W-Band Photonics-aided ISAC Wireless System Sharing OFDM Signal as Communication and Sensing](https://doi.org/10.1364/OFC.2024.Tu3K.4) | OFC | 2024 | Photonics-aided W-band communication and sensing experiment |
+| [Integrated sensing and communication in an optical fibre](https://doi.org/10.1038/S41377-022-01067-1) | Light: Science & Applications | 2023 | Optical-fibre sensing and data transmission |
 | [Multi-Channel Photonic THz-ISAC System Based on Integrated LFM-QAM Waveform](https://doi.org/10.1109/JLT.2024.3392282) | IEEE Journal of Lightwave Technology | 2024 | Multi-channel photonic THz ISAC with an integrated waveform |
 | [Photonic-Based Flexible Integrated Sensing and Communication With Multiple Targets Detection Capability for W-Band Fiber-Wireless Network](https://doi.org/10.1109/TMTT.2024.3355936) | IEEE TMTT | 2024 | W-band fibre-wireless ISAC with multiple-target detection |
 | [Photonics-aided integrated sensing and communications in mmW bands based on a DC-offset QPSK-encoded LFMCW](https://doi.org/10.1364/OE.474055) | Optics Express | 2022 | Photonics-aided mmWave ISAC using a coded LFMCW waveform |
-| [Integrated sensing and communication in an optical fibre](https://doi.org/10.1038/S41377-022-01067-1) | Light: Science & Applications | 2023 | Optical-fibre sensing and data transmission |
+| [Optical Integrated Sensing and Communication: Architectures, Potentials and Challenges](https://doi.org/10.1109/IOTM.001.2300196) | IEEE Internet of Things Magazine | 2024 | Optical ISAC architectures, potentials, and challenges |
+| [W-Band Photonics-aided ISAC Wireless System Sharing OFDM Signal as Communication and Sensing](https://doi.org/10.1364/OFC.2024.Tu3K.4) | OFC | 2024 | Photonics-aided W-band communication and sensing experiment |
 
 ### 🌐 Network Architecture
 
 | Paper | Venue | Year | Key contribution or scope |
 |---|---|---|---|
-| [Cooperative ISAC Networks: Opportunities and Challenges](https://doi.org/10.1109/MWC.008.2400151) | IEEE Wireless Communications | 2025 | Cooperative-network ISAC opportunities and challenges |
-| [Interference Mitigation for Network-Level ISAC: An Optimization Perspective](https://doi.org/10.1109/MCOM.001.2300674) | IEEE Communications Magazine | 2024 | Network-level interference mitigation |
-| [Deep Cooperation in ISAC System: Resource, Node and Infrastructure Perspectives](https://doi.org/10.1109/IOTM.001.2400042) | IEEE Internet of Things Magazine | 2024 | Cooperation across resources, nodes, and infrastructure |
+| [Co-Design of Sensing, Communications, and Control for Low-Altitude Wireless Networks](https://doi.org/10.1109/TMC.2025.3581616) | IEEE TMC | 2025 | Joint sensing, communication, and control co-design for low-altitude wireless networks |
 | [Precoding for Multi-Cell ISAC: From Coordinated Beamforming to Coordinated Multipoint and Bi-Static Sensing](https://doi.org/10.1109/TWC.2024.3417713) | IEEE TWC | 2024 | Multi-cell coordinated precoding and bi-static sensing |
 | [Toward Seamless Sensing Coverage for Cellular Multi-Static Integrated Sensing and Communication](https://doi.org/10.1109/TWC.2023.3325849) | IEEE TWC | 2024 | Cellular multistatic sensing coverage |
-| [UAV Meets Integrated Sensing and Communication: Challenges and Future Directions](https://doi.org/10.1109/MCOM.008.2200510) | IEEE Communications Magazine | 2023 | UAV-enabled ISAC challenges and research directions |
 | [Joint Maneuver and Beamforming Design for UAV-Enabled Integrated Sensing and Communication](https://doi.org/10.1109/TWC.2022.3211533) | IEEE TWC | 2023 | Coupled UAV trajectory and beamforming design |
+| [Cooperative ISAC Networks: Opportunities and Challenges](https://doi.org/10.1109/MWC.008.2400151) | IEEE Wireless Communications | 2025 | Cooperative-network ISAC opportunities and challenges |
+| [Simultaneous Sensing Data Acquisition and Sharing in Low-Altitude Wireless Networks: Fundamental Limits and Signaling Design](https://doi.org/10.1109/JSTSP.2026.3696543) | IEEE JSTSP (Early Access) | 2026 | Formal DOI record; fundamental limits and signaling for sensing-data acquisition and sharing |
+| [Interference Mitigation for Network-Level ISAC: An Optimization Perspective](https://doi.org/10.1109/MCOM.001.2300674) | IEEE Communications Magazine | 2024 | Network-level interference mitigation |
+| [Deep Cooperation in ISAC System: Resource, Node and Infrastructure Perspectives](https://doi.org/10.1109/IOTM.001.2400042) | IEEE Internet of Things Magazine | 2024 | Cooperation across resources, nodes, and infrastructure |
+| [UAV Meets Integrated Sensing and Communication: Challenges and Future Directions](https://doi.org/10.1109/MCOM.008.2200510) | IEEE Communications Magazine | 2023 | UAV-enabled ISAC challenges and research directions |
 | [Air-Ground Integrated Sensing and Communications: Opportunities and Challenges](https://doi.org/10.1109/MCOM.007.2200459) | IEEE Communications Magazine | 2023 | Air-ground ISAC opportunities and challenges |
 
 ### 🧠 AI/ML for ISAC
 
 | Paper | Venue | Year | Key contribution or scope |
 |---|---|---|---|
-| [Edge Perception: Intelligent Wireless Sensing at Network Edge](https://doi.org/10.1109/MCOM.001.2300660) | IEEE Communications Magazine | 2025 | Edge-oriented wireless sensing framework |
+| [Intelligent Multi-Modal Sensing-Communication Integration: Synesthesia of Machines](https://doi.org/10.1109/COMST.2023.3336917) | IEEE COMST | 2024 | Multimodal sensing-communication integration survey |
+| [Joint Sensing, Communication, and Computation for Vertical Federated Edge Learning in Edge Perception Networks](https://doi.org/10.1109/TMC.2026.3674960) | IEEE TMC | 2026 | Vertical federated edge learning across sensing, communication, and computation |
 | [Toward Ambient Intelligence: Federated Edge Learning With Task-Oriented Sensing, Computation, and Communication Integration](https://doi.org/10.1109/JSTSP.2022.3226836) | IEEE JSTSP | 2023 | Task-oriented federated edge learning across sensing, computation, and communication |
+| [ISAC-NET: Model-Driven Deep Learning for Integrated Passive Sensing and Communication](https://doi.org/10.1109/TCOMM.2024.3375818) | IEEE TCOM | 2024 | Model-driven learning for passive sensing and communication |
 | [AI-Enhanced Integrated Sensing and Communications: Advancements, Challenges, and Prospects](https://doi.org/10.1109/MCOM.001.2300724) | IEEE Communications Magazine | 2024 | Survey-style perspective on AI-enhanced ISAC |
+| [Sensing-Assisted High Reliable Communication: A Transformer-Based Beamforming Approach](https://doi.org/10.1109/JSTSP.2024.3405859) | IEEE JSTSP | 2024 | Transformer-based beamforming using sensing information |
+| [Edge Perception: Intelligent Wireless Sensing at Network Edge](https://doi.org/10.1109/MCOM.001.2300660) | IEEE Communications Magazine | 2025 | Edge-oriented wireless sensing framework |
 | [AI-Driven Integration of Sensing and Communication in the 6G Era](https://doi.org/10.1109/MNET.2023.3326064) | IEEE Network | 2024 | AI-driven ISAC integration perspective |
 | [Deep CLSTM for Predictive Beamforming in Integrated Sensing and Communication-Enabled Vehicular Networks](https://doi.org/10.23919/JCIN.2022.9906941) | JCIN | 2022 | CLSTM-based predictive beamforming for vehicular ISAC |
-| [ISAC-NET: Model-Driven Deep Learning for Integrated Passive Sensing and Communication](https://doi.org/10.1109/TCOMM.2024.3375818) | IEEE TCOM | 2024 | Model-driven learning for passive sensing and communication |
-| [Intelligent Multi-Modal Sensing-Communication Integration: Synesthesia of Machines](https://doi.org/10.1109/COMST.2023.3336917) | IEEE COMST | 2024 | Multimodal sensing-communication integration survey |
 | [Penetrative AI: Making LLMs Comprehend the Physical World](https://doi.org/10.1145/3638550.3641130) | ACM HotMobile | 2024 | LLM-oriented physical sensing research adjacent to ISAC |
 
 ### 🔒 Security
 
 | Paper | Venue | Year | Key contribution or scope |
 |---|---|---|---|
+| [Multi-Antenna Signal Masking and Round-Trip Transmission for Privacy-Preserving Wireless Sensing](https://doi.org/10.1109/TIFS.2024.3414185) | IEEE TIFS | 2024 | Multi-antenna signal masking for sensing privacy |
 | [Secure Radar-Communication Systems With Malicious Targets: Integrating Radar, Communications and Jamming Functionalities](https://doi.org/10.1109/TWC.2020.3023164) | IEEE TWC | 2021 | Malicious-target and joint-jamming threat model |
 | [Secure Dual-Functional Radar-Communication Transmission: Exploiting Interference for Resilience Against Target Eavesdropping](https://doi.org/10.1109/TWC.2022.3156893) | IEEE TWC | 2022 | Target-eavesdropping and interference design |
 | [Securing the Sensing Functionality in ISAC Networks: An Artificial Noise Design](https://doi.org/10.1109/TVT.2024.3422036) | IEEE TVT | 2024 | Artificial-noise design for sensing security |
 | [Privacy and Security in Ubiquitous Integrated Sensing and Communication: Threats, Challenges and Future Directions](https://doi.org/10.1109/IOTM.001.2300180) | IEEE Internet of Things Magazine | 2024 | Privacy and security threat survey |
-| [Multi-Antenna Signal Masking and Round-Trip Transmission for Privacy-Preserving Wireless Sensing](https://doi.org/10.1109/TIFS.2024.3414185) | IEEE TIFS | 2024 | Multi-antenna signal masking for sensing privacy |
 | [PriSense: Privacy-Preserving Wireless Sensing for Vital Signs Monitoring](https://doi.org/10.1109/LWC.2024.3434470) | IEEE WCL | 2024 | Privacy-preserving vital-sign sensing |
 
 ---
 
 ## 📚 All Papers by Topic
 
-The machine-frozen topical catalogue contains **59 publication rows covering 49
+The machine-frozen topical catalogue contains **66 publication rows covering 54
 unique DOI-linked works**. A work may appear in more than one topic, so row counts
 must not be added and presented as a unique-paper count. Standards are counted
 separately because they are not research papers.
 
 | Category | File | Curated rows | Description |
 |---|---|---:|---|
-| 📖 Surveys & Tutorials | [paper/surveys.md](paper/surveys.md) | 9 | General surveys, historical synthesis, limits, signals, and mobile networks |
+| 📖 Surveys & Tutorials | [paper/surveys.md](paper/surveys.md) | 10 | General surveys, historical synthesis, limits, signals, and mobile networks |
 | 📐 Theory & Bounds | [paper/theory.md](paper/theory.md) | 5 | Information, estimation, detection, CRB, and tradeoffs |
-| 📡 Waveform Design | [paper/waveform.md](paper/waveform.md) | 7 | OTFS, single-carrier, FMCW, index modulation, and beamforming |
+| 📡 Waveform Design | [paper/waveform.md](paper/waveform.md) | 8 | OTFS, single-carrier, FMCW, index modulation, and beamforming |
 | 📡 Antenna Technology | [paper/antenna.md](paper/antenna.md) | 6 | Near-field/XL-MIMO arrays, RIS, and metasurfaces |
 | 🔦 Optical ISAC | [paper/optical.md](paper/optical.md) | 6 | Optical fibre, optical wireless, photonic, and illumination systems |
-| 🌐 Network Architecture | [paper/network.md](paper/network.md) | 7 | Multistatic, multi-BS, D-MIMO, cell-free, UAV, and satellite systems |
-| 🧠 AI/ML for ISAC | [paper/ai_ml.md](paper/ai_ml.md) | 6 | Deep learning, model-driven learning, multimodal, and task-oriented systems |
+| 🌐 Network Architecture | [paper/network.md](paper/network.md) | 8 | Multistatic, multi-BS, D-MIMO, cell-free, UAV, and satellite systems |
+| 🧠 AI/ML for ISAC | [paper/ai_ml.md](paper/ai_ml.md) | 9 | Deep learning, model-driven learning, multimodal, and task-oriented systems |
 | 🔒 Security & Privacy | [paper/security.md](paper/security.md) | 6 | Threat models, eavesdropping, artificial noise, privacy, and adversarial surfaces |
-| 🏗️ Applications | [paper/application.md](paper/application.md) | 7 | Aerial, space, optical, and fibre contexts |
+| 🏗️ Applications | [paper/application.md](paper/application.md) | 8 | Aerial, space, optical, and fibre contexts |
 | 📋 Standardization | [paper/standardization.md](paper/standardization.md) | 12 official records | 3GPP, IEEE, ITU-R, and ETSI status records |
 
 ---
@@ -478,7 +500,7 @@ examples unless a paper-value comparison artifact with declared tolerances is
 accepted.
 
 > **Audited snapshot, 2026-07-18:** the homepage-preservation revision passed
-> 665/665 strict tests in the locked Python 3.12 environment; all seven
+> 666/666 strict tests in the locked Python 3.12 environment; all seven
 > executable certificates passed their 99/99 declared checks; and the covered
 > run measured 85.05% aggregate statement coverage. The protected workflow
 > repeats the current tree on Python 3.10, 3.11, and 3.12 before merge. These

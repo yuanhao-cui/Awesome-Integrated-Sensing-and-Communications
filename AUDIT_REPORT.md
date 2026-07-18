@@ -14,9 +14,11 @@ The audit now separates a rich, navigable homepage from the smaller
 machine-frozen topical catalogue instead of replacing the original homepage
 with a short summary:
 
-- the original six-part, 44-entry Featured Papers layout is retained after
-  correcting identifiers, titles, authors, venues, years, and claim boundaries;
-- 59 publication rows across nine topical files, representing 49 unique DOI-linked works; cross-listed works use the same DOI and metadata.
+- the original six-part Featured Papers layout and all 44 original entries are
+  retained after correcting identifiers, titles, authors, venues, years, and
+  claim boundaries; the expanded view now contains 53 entries;
+- 66 publication rows across nine topical files, representing 54 unique
+  DOI-linked works; cross-listed works use the same DOI and metadata.
 - 12 standards/pre-standardization rows linked to official IEEE, 3GPP, ITU-R,
   or ETSI records and labeled by maturity.
 - no Google Scholar discovery links or reused IEEE document-number placeholders in the curated root/topic files;
@@ -68,47 +70,81 @@ The initial independent scans reported:
 
 The obsolete link_check_report.md was removed so that this report is the single audit record.
 
-The final machine-structured DOI audit found 109 DOI occurrences and 54 unique
-DOI records across the topical catalogue, code citations, and preferred
-citation scope.
-Crossref registered all 54. Every DOI had title evidence, with no unregistered
-DOI, identifier–title conflict, or title mismatch after identifier-only labels
-were excluded. Across 69 complete structured citation records (59 catalogue
-rows, nine BibTeX entries, and one CFF preferred citation), title, full
-publication-order authors, venue, and year matched 69/69. All optional fields
-present in Crossref also matched: volume 68/68, issue 61/61, pages 65/65, and
-article number 3/3. The only normalized-name exceptions were publication
+The final machine-structured scope contains 60 unique DOI authorities: 54
+catalogue works, five code/citation references, and one formal early-access
+record. Crossref registered all 60.
+Every DOI had title evidence, with no unregistered DOI, identifier–title
+conflict, or title mismatch after identifier-only labels were excluded. Across
+76 complete structured citation records (66 catalogue rows, nine BibTeX
+entries, and one CFF preferred citation), title, full publication-order
+authors, venue, and year matched 76/76. All optional fields present in Crossref
+also matched: volume 75/75, issue 66/66, pages 72/72, and article number 3/3.
+The only normalized-name exceptions were publication
 bylines that retain initials used by the publications; every structured field
 uses the complete publisher-deposited display name and publication order.
 
-All 54 DOI-linked works in that machine-structured scope are frozen in the
+All 60 DOI-linked works in that machine-structured scope are frozen in the
 version-controlled [authority metadata snapshot](audit/authority-metadata.json), with a separate
 [JSON Schema](audit/authority-metadata.schema.json). The compact Crossref
 snapshot records canonical DOI, exact title, complete deposited author order,
 venue, year, volume, and, where deposited, issue, pages, or article number. Its
-catalogue section covers the 49 works underlying all 59 topical rows, with
-required-field coverage of 49/49 for DOI, title, authors, venue, year, and
-volume; optional-field coverage is 46/49 issues, 47/49 page fields, and 2/49
-article numbers. A separate auxiliary-reference section covers the remaining
-five works cited by the code baselines: four journal articles and one
-monograph. Each record retains its exact Crossref API source URL, publisher,
+catalogue section covers the 54 works underlying all 66 topical rows, with
+required-field coverage of 54/54 for DOI, title, authors, venue, year, and
+volume; optional-field coverage is 49/54 issues, 52/54 page fields, and 2/54
+article numbers. A separate auxiliary-reference section covers five works cited
+by the code baselines (four journal articles and one monograph) plus the formal
+early-access journal article whose volume was not yet deposited. Each record
+retains its exact Crossref API source URL, publisher,
 source type, deposit-update timestamp, and the 2026-07-18 retrieval date.
 
 ### Homepage preservation review
 
-The restored homepage keeps the original 44 Featured Papers rows and six
-subsections. Nineteen rows overlap the machine-frozen topical catalogue. The
-preservation review found 24 additional formal DOI records that had been removed
-during the first compression pass and restored them with canonical DOI links;
-one remaining item is explicitly labeled as an arXiv preprint rather than being
-assigned an unsupported journal venue. A deterministic catalogue test fixes the
-six subsection row counts at 7/9/6/8/8/6 and rejects noncanonical scholarly
-links, Google Scholar discovery URLs, and placeholder titles.
+The restored homepage keeps all original 44 Featured Papers rows and the same
+six subsections, then adds nine records without deleting or renaming a retained
+work. Four established surveys by other author groups expand field coverage
+alongside five selected recent papers involving the maintainer. The resulting
+53-work view contains 27
+rows that overlap the machine-frozen topical catalogue, 25 additional formal
+DOI records, and one explicitly labeled arXiv preprint.
 
-The 24 restored formal records are not silently counted as part of the 59-row,
-49-work machine-frozen topical catalogue. Promoting them into `paper/*.md` would
-require a reviewed authority-snapshot refresh and matching verifier-count
-update. The ACM DOI for Penetrative AI is retained as the canonical identifier;
+This refresh intentionally audited the maintainer's recent publications and is
+therefore **not described as blind selection**. The documented additions were
+assessed against the same disclosed thresholds: formal status, direct ISAC relevance,
+contribution breadth or technical depth, venue standing in the relevant
+subfield, publication completeness, and recency as a tie-breaker. Closely
+overlapping, preprint-only, guest-editorial, and adjacent non-ISAC work was not
+promoted solely because of authorship. Within Featured Papers, no
+author-specific section, label, badge, boldface, or other styling is used, and
+two of the five targeted Featured additions are placed below their subsection
+midpoint.
+
+A manual byline audit found Yuanhao Cui on 12/53 Featured works (22.6%):
+Landmark 6/12, Network 3/10, AI/ML 3/10, and zero in the other three sections.
+The volume-complete topical catalogue moves from 6/49 to 11/54 such works
+(20.4%). These figures disclose concentration; they are not quality scores or
+quotas.
+
+The following screening boundary records representative include/exclude
+decisions from the targeted review. It is not presented as an exhaustive list
+of every publication by any author.
+
+| Treatment | Identifiers | Evidence-based reason |
+|---|---|---|
+| Featured and topical catalogue | `10.1109/JSAC.2025.3614025`; `10.1109/TMC.2025.3581616`; `10.1109/JSTSP.2024.3405859`; `10.1109/TMC.2026.3674960` | Formal, direct, non-duplicative ISAC contributions spanning tutorial, network co-design, beamforming, and edge learning |
+| Featured and auxiliary authority snapshot | `10.1109/JSTSP.2026.3696543` | Formal DOI and pages existed, but volume/issue were absent; early-access status is explicit and machine-frozen |
+| Topical catalogue only | `10.1109/TWC.2025.3598997` | Formal direct work retained for completeness, but not Featured because it overlaps the selected federated-learning record |
+| Not promoted in this refresh | `10.1109/JIOT.2024.3361173`; `10.1109/MNET.2025.3562144`; `10.1109/MNET.2024.3352092`; `10.1109/MBITS.2024.3376638`; `10.1109/JIOT.2024.3486573`; `10.1109/MWC.2026.3672360`; `10.1109/TNSE.2026.3666665` | Valid formal records, but substantially overlap existing survey, waveform, beamforming, service, or low-altitude coverage; adding them would increase concentration without a distinct navigational gain |
+| Not imported as formal journal records | arXiv `2502.10203`; arXiv `2601.08463` | Preprint-only status at the cutoff; no verified matching journal DOI was found |
+| Not imported by category | Guest editorials; general low-altitude routing/control; general semantic-communication or antenna papers | Editorial document type or insufficiently direct ISAC scope |
+
+A deterministic catalogue test freezes the complete original 44-identifier set,
+the final six subsection counts at 12/9/6/10/10/6, the 53-row badge/count, and
+the preprint's last-place status in Landmark Surveys. It also rejects
+noncanonical scholarly links, Google Scholar discovery URLs, and placeholder
+titles. The 25 formal Featured records outside the catalogue are not silently
+included in the 66-row/54-work topical counts; the formal early-access record is
+nevertheless frozen in the auxiliary authority section. The ACM DOI for
+Penetrative AI is retained as the canonical identifier;
 its landing-page WAF is covered by one exact Lychee exclusion, while the
 [exact Crossref record](https://api.crossref.org/works/10.1145%2F3638550.3641130)
 remains in the live-link input set.
@@ -214,7 +250,7 @@ institutional manuscript and the arXiv source. The baseline records both rather
 than silently selecting a version.
 
 The aggregate single-process coverage hard gate is 70%. The current
-homepage-preservation revision passed 665/665 strict tests in the locked Python
+homepage-preservation revision passed 666/666 strict tests in the locked Python
 3.12 environment and measured 85.05% statement coverage (3,739 of 4,396
 statements). The protected workflow independently repeats the current tree on
 Python 3.10, 3.11, and 3.12 before merge. This replaces the unsupported claim
@@ -232,7 +268,26 @@ upgrade any educational surrogate to a paper reproduction.
 
 ## Recent formally published additions
 
-To bring the index through the cutoff without speculative “latest” labeling, the audit added selected 2026 version-of-record publications, including:
+To bring the index through the cutoff without speculative “latest” labeling,
+the reviewed refresh added five volume-complete Crossref records involving the
+maintainer to the topical catalogue:
+
+- [Sensing With Communication Signals: From Information Theory to Signal Processing](https://doi.org/10.1109/JSAC.2025.3614025), IEEE JSAC, vol. 44, 2026;
+- [Co-Design of Sensing, Communications, and Control for Low-Altitude Wireless Networks](https://doi.org/10.1109/TMC.2025.3581616), IEEE TMC 24(11), 2025;
+- [Sensing-Assisted High Reliable Communication: A Transformer-Based Beamforming Approach](https://doi.org/10.1109/JSTSP.2024.3405859), IEEE JSTSP 18(5), 2024;
+- [Joint Sensing, Communication, and Computation for Vertical Federated Edge Learning in Edge Perception Networks](https://doi.org/10.1109/TMC.2026.3674960), IEEE TMC 25(8), 2026;
+- [Integrated Sensing, Communication, and Computation for Over-the-Air Federated Edge Learning](https://doi.org/10.1109/TWC.2025.3598997), IEEE TWC, vol. 25, 2026.
+
+The first four appear in Featured Papers. The TWC federated-learning work is
+retained in the complete AI/ML topic table but not Featured, avoiding redundant
+prominence for two closely related records. Crossref also registered
+[Simultaneous Sensing Data Acquisition and Sharing in Low-Altitude Wireless Networks: Fundamental Limits and Signaling Design](https://doi.org/10.1109/JSTSP.2026.3696543)
+as a formal 2026 IEEE JSTSP journal article with pages 1–15, but no volume or
+issue had been deposited by the cutoff. It is labeled as a formal early-access
+record and is not counted in the volume-complete machine-frozen table.
+
+The earlier cutoff refresh also added selected 2026 version-of-record
+publications, including:
 
 - [Toward 6G Networks: A Survey on Integrated Sensing and Communication in Cell-Free Massive MIMO](https://doi.org/10.1109/JIOT.2026.3693228);
 - [Large AI Model for Multimodal Integrated Sensing and Communication](https://doi.org/10.1109/MNET.2026.3661589);
@@ -247,8 +302,8 @@ Inclusion means that a formal record existed by 2026-07-18, not that the work is
 
 | Gate | Pass criteria | Audited-tree result |
 |---|---|---|
-| Gate 1 — software and simulation integrity | Exact direct dependencies; Python 3.10–3.12 CI matrix; warning-free compilation and tests; valid CFF/YAML; seven machine-readable JSON certificates; aggregate single-process coverage at least 70%; numerical paper-value comparison whenever exact reproduction is claimed | **PASS locally.** The current locked Python 3.12.13 environment passed 665/665 strict tests and all seven certificates (99/99 checks). The covered run measured 85.05% (3,739/4,396 statements). Dependency audit, install consistency, CFF 1.2/YAML validation, Ruff, YAML lint, compilation, and whitespace checks passed; compilation and tests were warning-free. The protected workflow repeats the current tree on Python 3.10, 3.11, and 3.12 and separately performs no-cache macOS arm64 installs for all three versions before merge. |
-| Gate 2 — scholarly content and link integrity | Canonical identifiers; exact metadata; no title/identifier collisions; official standards records and maturity; evidence-bounded descriptions; no unsupported reproduction claims; no malformed or broken tracked links; narrowly documented exact endpoint exclusions | **PASS locally.** The reviewed snapshot covers 54/54 DOI authorities, all 69 structured citation records, and 12 official standards records; its SHA-256 is `3e34b11ebaa31778093d6e76f259e497afd75f2c7c732fe284d46d29f14028a0`. The deterministic audit found zero failures across 28 Markdown files, 361 references, and 155 unique external URLs. Independent Lychee checked 498 link occurrences (332 unique): 492 succeeded, zero failed, and six excluded occurrences matched five exact documented endpoints. |
+| Gate 1 — software and simulation integrity | Exact direct dependencies; Python 3.10–3.12 CI matrix; warning-free compilation and tests; valid CFF/YAML; seven machine-readable JSON certificates; aggregate single-process coverage at least 70%; numerical paper-value comparison whenever exact reproduction is claimed | **PASS locally.** The current locked Python 3.12.13 environment passed 666/666 strict tests and all seven certificates (99/99 checks). The covered run measured 85.05% (3,739/4,396 statements). Dependency audit, install consistency, CFF 1.2/YAML validation, Ruff, YAML lint, compilation, and whitespace checks passed; compilation and tests were warning-free. The protected workflow repeats the current tree on Python 3.10, 3.11, and 3.12 and separately performs no-cache macOS arm64 installs for all three versions before merge. |
+| Gate 2 — scholarly content and link integrity | Canonical identifiers; exact metadata; no title/identifier collisions; official standards records and maturity; evidence-bounded descriptions; no unsupported reproduction claims; no malformed or broken tracked links; narrowly documented exact endpoint exclusions | **PASS locally.** The reviewed snapshot covers all 60 DOI authorities, all 76 structured citation records, and 12 official standards records; its SHA-256 is `572c5dc66c6026798fc476e370c5a47a4202a97ca985692abfb88f75efeb31d5`. The deterministic audit found zero failures across 28 Markdown files, 384 references, and 161 unique external URLs. Independent Lychee checked 533 link occurrences (350 unique): 527 succeeded, zero failed, six excluded occurrences matched five exact documented endpoints, and 147 redirects were observed. |
 
 Passing one gate does not compensate for failing the other. Repository policy
 requires both workflows to pass before merge; each uploads machine-readable
