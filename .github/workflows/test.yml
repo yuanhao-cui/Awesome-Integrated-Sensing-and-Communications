@@ -1,46 +1,178 @@
-name: Test All Baselines
+---
+name: Gate 1 - Software and Simulation Integrity
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  dependency-lock-installability:
+    name: Locked install macOS arm64, Python ${{ matrix.python-version }}
+    runs-on: macos-14
+    timeout-minutes: 25
+    env:
+      UV_NO_CACHE: "1"
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-      fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Set up the locked environment manager
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          version: "0.11.28"
+          enable-cache: false
+
+      - name: Verify the native architecture
+        run: >-
+          python -c
+          'import platform; assert platform.machine() == "arm64", platform.machine()'
+
+      - name: Install and verify every selected locked artifact
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov numpy scipy matplotlib pyyaml
-          # Install each baseline's requirements
-          for dir in code/baselines/*/; do
-            if [ -f "$dir/requirements.txt" ]; then
-              pip install -r "$dir/requirements.txt" || true
-            fi
+          uv lock --check --refresh
+          uv sync --locked --only-group ci --python python
+          .venv/bin/python scripts/check_dependency_lock.py
+          uv pip check --python .venv/bin/python
+
+  software-and-simulation-integrity:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      MPLBACKEND: Agg
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up the locked environment manager
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          version: "0.11.28"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Verify the universal dependency lock
+        run: |
+          uv lock --check --refresh
+          for python_version in 3.10 3.11 3.12; do
+            uv tree --locked --only-group ci \
+              --python-version "$python_version" \
+              --python-platform x86_64-unknown-linux-gnu > /dev/null
+            uv tree --locked --only-group ci \
+              --python-version "$python_version" \
+              --python-platform aarch64-apple-darwin > /dev/null
+            uv tree --locked --only-group cff-validation \
+              --python-version "$python_version" \
+              --python-platform x86_64-unknown-linux-gnu > /dev/null
+            uv tree --locked --only-group cff-validation \
+              --python-version "$python_version" \
+              --python-platform aarch64-apple-darwin > /dev/null
           done
 
-      - name: Run tests with coverage
+      - name: Install the complete hashed dependency lock
         run: |
-          pytest code/baselines/ --cov=code --cov-report=xml --cov-report=term-missing -v || true
-          echo "Tests completed. Coverage report generated."
+          uv sync --locked --only-group ci --python python
+          .venv/bin/python scripts/check_dependency_lock.py > dependency-lock-audit.json
+          uv pip check --python .venv/bin/python
+          uv pip freeze --python .venv/bin/python > dependency-installed.txt
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
-      - name: Upload coverage report
+      - name: Compile executable Python
+        run: >-
+          PYTHONPYCACHEPREFIX=.pycache-ci
+          python -W error -m compileall -q -f conftest.py scripts tests code/baselines
+
+      - name: Lint Python
+        run: python -m ruff check conftest.py code scripts tests
+
+      - name: Parse YAML and Citation File Format
+        run: python tests/validate_yaml.py
+
+      - name: Validate Citation File Format schema
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-cff uv sync --locked \
+            --only-group cff-validation --python python
+          .venv-cff/bin/cffconvert --validate
+
+      - name: Lint YAML
+        run: >-
+          python -m yamllint -s
+          .github
+          .yamllint.yml
+          link-exceptions.yaml
+          code/baselines/*/configs
+          code/baselines/*/reproducibility.yaml
+
+      - name: Reject whitespace errors
+        run: >-
+          python -m pytest tests/test_repository_hygiene.py
+          --strict-config --strict-markers -W error
+
+      - name: Run machine-readable JSON certificates
+        run: |
+          python -W error -m code.baselines.isac_energy_efficient_beamforming.examples.verify_reference_slice \
+            --json > certificate-energy.json
+          python -W error -m code.baselines.isac_capacity_distortion.examples.verify_surrogate \
+            --json > certificate-capacity.json
+          python -W error -m code.baselines.ris_isac_beamforming.examples.verify_surrogate \
+            --json > certificate-ris.json
+
+      - name: Run deterministic local baseline certificates
+        run: |
+          python -W error scripts/verify_simulation_baseline.py \
+            csi_ratio_doppler_estimation --json > certificate-csi.json
+          python -W error scripts/verify_simulation_baseline.py \
+            isac_resource_allocation --json > certificate-resource.json
+          python -W error scripts/verify_simulation_baseline.py ofdm_ambiguity_function --json > certificate-ofdm.json
+          python -W error scripts/verify_simulation_baseline.py xl_mimo_beam_training --json > certificate-xl-mimo.json
+
+      - name: Run the full strict single-process suite
+        run: >-
+          python -m pytest code/baselines tests
+          --strict-config --strict-markers -W error
+          --cov --cov-config=.coveragerc
+          --cov-report=term-missing --cov-report=xml
+          --cov-fail-under=70
+
+      - name: Upload dependency and coverage evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: coverage-report-py${{ matrix.python-version }}
-          path: coverage.xml
+          name: gate1-evidence-python-${{ matrix.python-version }}
+          path: |
+            dependency-installed.txt
+            dependency-lock-audit.json
+            certificate-*.json
+            coverage.xml
+          if-no-files-found: error
+          retention-days: 14

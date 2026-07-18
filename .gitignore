@@ -11,6 +11,7 @@ build/
 # Virtual environments
 .env
 .venv
+.venv-*/
 env/
 venv/
 
@@ -26,6 +27,7 @@ Thumbs.db
 
 # Coverage
 .coverage
+.coverage.*
 htmlcov/
 coverage.xml
 
@@ -37,3 +39,4 @@ code/baselines/*/results/*.csv
 # Temp
 *.tmp
 *.log
+.lycheecache

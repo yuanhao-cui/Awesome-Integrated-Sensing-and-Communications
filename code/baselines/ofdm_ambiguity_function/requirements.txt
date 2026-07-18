@@ -1,0 +1,4 @@
+-c ../../../requirements-ci.txt
+numpy
+matplotlib
+pytest

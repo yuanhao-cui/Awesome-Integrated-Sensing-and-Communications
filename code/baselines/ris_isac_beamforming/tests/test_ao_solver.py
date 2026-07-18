@@ -7,8 +7,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.system_model import RIS_ISAC_System
-from src.ao_solver import AlternatingOptimizationSolver
+from ..src.system_model import RIS_ISAC_System
+from ..src.ao_solver import AlternatingOptimizationSolver
 
 
 class TestAOSolver:
@@ -16,7 +16,6 @@ class TestAOSolver:
 
     def setup_method(self):
         self.system_snr = RIS_ISAC_System(M=4, K=2, L=30, seed=42)
-        self.system_crb = RIS_ISAC_System(M=4, K=2, L=30, seed=43)
 
     def test_ao_snr_solver(self):
         """Test AO solver with SNR constraint."""
@@ -28,20 +27,9 @@ class TestAOSolver:
         assert "theta" in result
         assert "sum_rate" in result
 
-    def test_ao_crb_solver(self):
-        """Test AO solver with CRB constraint."""
-        solver = AlternatingOptimizationSolver(
-            self.system_crb, problem_type="crb", crb_max=1e-2, max_iter=10
-        )
-        result = solver.solve()
-        assert "W" in result
-        assert "theta" in result
-        assert "sum_rate" in result
-        assert "crb" in result
-
     def test_ao_invalid_type(self):
         """Test AO solver rejects invalid problem type."""
-        with pytest.raises(ValueError, match="Unknown problem_type"):
+        with pytest.raises(ValueError, match="Only problem_type='snr'"):
             AlternatingOptimizationSolver(
                 self.system_snr, problem_type="invalid"
             )
@@ -52,7 +40,7 @@ class TestAOSolver:
             self.system_snr, problem_type="snr", snr_min_dB=5.0, max_iter=50, tol=1e-3
         )
         result = solver.solve()
-        # Either converged or hit max iterations
+        assert result["converged"]
         assert result["iterations"] <= 50
 
     def test_ao_evaluate(self):
@@ -67,6 +55,10 @@ class TestAOSolver:
         assert "power_used" in metrics
         assert "sinr_per_user" in metrics
         assert len(metrics["sinr_per_user"]) == self.system_snr.K
+        assert np.min(metrics["sinr_per_user"]) >= (
+            self.system_snr.sinr_thresh * (1.0 - 5e-4)
+        )
+        assert metrics["snr_sensing"] >= 10 ** (5.0 / 10) * (1.0 - 5e-4)
 
     def test_ao_unit_modulus(self):
         """Test AO solver output satisfies RIS unit modulus."""
@@ -84,14 +76,6 @@ class TestAOSolver:
         result = solver.solve()
         assert result["sum_rate"] > 0
 
-    def test_ao_crb_positive(self):
-        """Test AO with CRB returns positive CRB."""
-        solver = AlternatingOptimizationSolver(
-            self.system_crb, problem_type="crb", crb_max=1e-2, max_iter=10
-        )
-        result = solver.solve()
-        assert result["crb"] > 0
-
     def test_ao_power_constraint(self):
         """Test AO solution satisfies power constraint."""
         solver = AlternatingOptimizationSolver(
@@ -99,4 +83,4 @@ class TestAOSolver:
         )
         result = solver.solve()
         total_power = np.sum(np.linalg.norm(result["W"], axis=0) ** 2)
-        assert total_power <= self.system_snr.P_max * 1.05
+        assert total_power <= self.system_snr.P_max * (1.0 + 5e-4)

@@ -1,120 +1,88 @@
-"""
-Tests for Dinkelbach Solver
-============================
+"""Strict tests for the exact fixed-direction Dinkelbach slice."""
 
-Tests for the Dinkelbach method for fractional programming.
-
-Reference: Zou et al., IEEE Trans. Commun., 2024 (Algorithm 1)
-"""
-
-import sys
-import os
 import numpy as np
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ..src.dinkelbach_solver import (
+    InfeasibleReferenceProblem,
+    SingleUserPowerDinkelbach,
+)
+from ..src.system_model import ISACSystemModel
 
-from src.system_model import ISACSystemModel
-from src.dinkelbach_solver import DinkelbachSolver, DinkelbachResult
+
+def _solver() -> SingleUserPowerDinkelbach:
+    model = ISACSystemModel(
+        M=4,
+        K=1,
+        N=5,
+        P_max_dbm=30.0,
+        P0_dbm=30.0,
+        sigma_c_dbm=-20.0,
+        sigma_s_dbm=-10.0,
+        seed=91,
+    )
+    return SingleUserPowerDinkelbach(model, tolerance=1e-12)
 
 
-class TestDinkelbachSolver:
-    """Test suite for Dinkelbach solver."""
+def test_dinkelbach_matches_independent_dense_grid_oracle() -> None:
+    solver = _solver()
+    result = solver.solve()
+    oracle_power, oracle_ee, spacing = solver.dense_grid_oracle()
+    assert result.converged
+    assert abs(result.power_watt - oracle_power) <= 1.1 * spacing
+    assert result.ee_c >= oracle_ee * (1.0 - 2e-10)
+    assert abs(result.residual) <= 1e-10
 
-    @pytest.fixture
-    def model(self):
-        """Create test system model with small parameters for fast tests."""
-        return ISACSystemModel(M=8, K=2, N=10, seed=42)
 
-    @pytest.fixture
-    def solver(self, model):
-        """Create Dinkelbach solver."""
-        return DinkelbachSolver(
-            model,
-            max_dinkelbach_iter=10,
-            max_inner_iter=5,
-            verbose=False,
-        )
+def test_history_is_a_real_dinkelbach_certificate() -> None:
+    result = _solver().solve()
+    lambdas = np.array([item.lambda_before for item in result.history])
+    residuals = np.array([item.subtractive_residual for item in result.history])
+    assert len(result.history) >= 2
+    assert residuals[0] > 0.0
+    assert np.all(np.diff(lambdas) >= -1e-13)
+    assert abs(residuals[-1]) < abs(residuals[0]) * 1e-8
 
-    def test_solver_initialization(self, model):
-        """Test solver initializes correctly."""
-        solver = DinkelbachSolver(model)
-        assert solver.M == 8
-        assert solver.K == 2
-        assert solver.max_dinkelbach_iter == 30
 
-    def test_solve_returns_result(self, solver):
-        """Test solve returns a DinkelbachResult."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert isinstance(result, DinkelbachResult)
+def test_sinr_constraint_is_exactly_converted_to_minimum_power() -> None:
+    solver = _solver()
+    gain = abs(solver.model.get_channel(0).conj() @ solver.direction) ** 2
+    required_power = 0.8 * solver.model.P_max
+    gamma = required_power * gain / solver.model.sigma_c2
+    p_min, _ = solver.feasible_power_interval(gamma_min=gamma)
+    assert p_min == pytest.approx(required_power, rel=1e-13)
+    result = solver.solve(gamma_min=gamma)
+    assert result.power_watt >= required_power * (1.0 - 1e-12)
+    assert result.sinr >= gamma * (1.0 - 1e-12)
 
-    def test_result_has_correct_fields(self, solver):
-        """Test result has all required fields."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert hasattr(result, 'W')
-        assert hasattr(result, 'ee_c')
-        assert hasattr(result, 'sum_rate')
-        assert hasattr(result, 'total_power')
-        assert hasattr(result, 'n_iterations')
-        assert hasattr(result, 'converged')
-        assert hasattr(result, 'obj_history')
 
-    def test_beamforming_dimensions(self, solver):
-        """Test beamforming matrix has correct dimensions."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert result.W.shape == (8, 2)
+def test_crb_constraint_is_postvalidated() -> None:
+    solver = _solver()
+    unconstrained = solver.solve()
+    target = unconstrained.crb / 2.0
+    p_min, _ = solver.feasible_power_interval(crb_max=target)
+    result = solver.solve(crb_max=target)
+    assert result.power_watt >= p_min * (1.0 - 1e-12)
+    assert result.crb <= target * (1.0 + 1e-10)
 
-    def test_ee_c_positive(self, solver):
-        """Test EE_C is positive."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert result.ee_c >= 0
 
-    def test_sum_rate_positive(self, solver):
-        """Test sum rate is positive."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert result.sum_rate >= 0
+def test_infeasible_constraint_raises_instead_of_returning_old_iterate() -> None:
+    solver = _solver()
+    gain = abs(solver.model.get_channel(0).conj() @ solver.direction) ** 2
+    impossible_gamma = 2.0 * solver.model.P_max * gain / solver.model.sigma_c2
+    with pytest.raises(InfeasibleReferenceProblem, match="exceeds"):
+        solver.solve(gamma_min=impossible_gamma)
 
-    def test_power_constraint(self, solver, model):
-        """Test power constraint is satisfied."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert result.total_power <= model.P_max + 1e-4
 
-    def test_dinkelbach_converges(self, model):
-        """Test Dinkelbach converges in reasonable iterations."""
-        solver = DinkelbachSolver(
-            model,
-            max_dinkelbach_iter=30,
-            max_inner_iter=10,
-            verbose=False,
-        )
-        result = solver.solve(target_angle_deg=90.0)
-        # Should converge in ≤ 30 iterations
-        assert result.n_iterations <= 30
+def test_same_seed_yields_bitwise_equal_result() -> None:
+    first = _solver().solve()
+    second = _solver().solve()
+    assert first.power_watt == second.power_watt
+    assert first.ee_c == second.ee_c
+    np.testing.assert_array_equal(first.W, second.W)
 
-    def test_obj_history_length(self, solver):
-        """Test obj_history has entries for each iteration."""
-        result = solver.solve(target_angle_deg=90.0)
-        assert len(result.obj_history) >= 1
-        assert len(result.obj_history) <= solver.max_dinkelbach_iter
 
-    def test_ee_c_improves_over_iterations(self, solver):
-        """Test EE_C generally improves (non-decreasing)."""
-        result = solver.solve(target_angle_deg=90.0)
-        # Final EE should be ≥ initial EE
-        if len(result.obj_history) >= 2:
-            assert result.obj_history[-1] >= result.obj_history[0] - 1e-4
-
-    def test_different_targets(self, solver):
-        """Test solver works with different target angles."""
-        for angle in [45.0, 90.0, 135.0]:
-            result = solver.solve(target_angle_deg=angle)
-            assert result.ee_c >= 0
-
-    def test_custom_initialization(self, model):
-        """Test solver with custom initial beamforming."""
-        solver = DinkelbachSolver(model, max_dinkelbach_iter=5)
-        W_init = np.random.randn(8, 2) + 1j * np.random.randn(8, 2)
-        W_init *= np.sqrt(model.P_max / np.sum(np.abs(W_init) ** 2))
-
-        result = solver.solve(target_angle_deg=90.0, W_init=W_init)
-        assert result.W.shape == (8, 2)
+def test_multuser_problem_is_rejected_as_out_of_scope() -> None:
+    model = ISACSystemModel(M=4, K=2, N=5)
+    with pytest.raises(ValueError, match="K=1"):
+        SingleUserPowerDinkelbach(model)

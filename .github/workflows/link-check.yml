@@ -1,4 +1,5 @@
-name: 🔗 Link Health Check
+---
+name: Gate 2 - Scholarly Content and Link Integrity
 
 on:
   push:
@@ -6,81 +7,110 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: "0 0 * * 0"   # Weekly every Sunday midnight UTC
+    - cron: "0 0 * * 0"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  lychee-link-check:
-    name: Lychee Link Checker
-    runs-on: ubuntu-latest
+  deterministic-integrity:
+    name: Deterministic catalog and tracked-link inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONHASHSEED: "0"
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache lychee results
-        uses: actions/cache@v4
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
-          path: .lychee-cache
-          key: lychee-${{ github.sha }}
-          restore-keys: |
-            lychee-
-
-      - name: Run lychee
-        uses: lycheeverse/lychee-action@v1
+          python-version: "3.12"
+      - name: Set up the locked environment manager
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
+          version: "0.11.28"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install the complete hashed integrity lock
+        run: |
+          uv lock --check --refresh
+          uv sync --locked --only-group integrity --python python
+          .venv/bin/python scripts/check_dependency_lock.py
+          uv pip check --python .venv/bin/python
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Run deterministic integrity tests
+        run: >-
+          python -m pytest
+          tests/test_links.py tests/test_arxiv_crawler.py tests/test_catalog.py
+          tests/test_authority_metadata.py
+          --strict-config --strict-markers -W error
+      - name: Verify frozen authority metadata and emit audit evidence
+        run: >-
+          python scripts/verify_authority_metadata.py
+          --json-out authority-metadata-audit.json
+      - name: Audit tracked Markdown links without network access
+        run: python scripts/check_links.py --offline --json-out link-audit.json
+      - name: Upload deterministic audit
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: deterministic-integrity-audits
+          path: |
+            authority-metadata-audit.json
+            link-audit.json
+          if-no-files-found: error
+          retention-days: 14
+
+  independent-live-links:
+    name: Fresh independent Lychee live-link audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Check live links and Markdown fragments
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8  # v2.9.0
+        with:
+          lycheeVersion: v0.24.2
           args: >-
+            --root-dir .
             --verbose
             --no-progress
-            --cache
-            --max-cache-age 7d
-            --header "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            --hidden
+            --include-fragments=anchor-only
             --timeout 20
-            --retry-interval 200
-            README.md
-            paper/*.md
-            datasets/*.md
-            tools/*.md
-            benchmark/*.md
+            --max-retries 2
+            --retry-wait-time 2
+            --host-concurrency 2
+            --host-request-interval 250ms
+            --max-concurrency 12
+            --exclude-path '(^|/)\.pytest_cache/'
+            --exclude-path '(^|/)link-exceptions\.yaml$'
+            --exclude-path '(^|/)\.github/workflows/link-check\.yml$'
+            --exclude '^https://export\.arxiv\.org/api/query$'
+            --exclude '^http://www\.w3\.org/2005/Atom$'
+            --exclude '^https://www\.mathworks\.com/products/radar\.html$'
+            --exclude '^https://doi\.org/10\.1002/0471663085$'
+            './**/*.md'
+            './**/*.cff'
+            './**/*.yml'
+            './**/*.yaml'
+            './scripts/*.py'
+            './code/**/src/*.py'
+            './code/**/examples/*.py'
+            './code/**/setup.py'
+            './code/baselines/ofdm_ambiguity_function/*.py'
+            './audit/*.json'
+            './LICENSE'
           fail: true
-
-      - name: Upload lychee report
+          failIfEmpty: true
+      - name: Upload Lychee report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: lychee-report
+          name: lychee-live-link-report
           path: lychee/out.md
-          retention-days: 30
-
-  python-link-check:
-    name: Python Link Checker (supplementary)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install deps
-        run: pip install pytest requests
-
-      - name: Run pytest link tests
-        run: pytest tests/test_links.py::TestLinkReachability -v --tb=short
-
-  content-correspondence:
-    name: Content Correspondence (sampling)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install deps
-        run: pip install pytest requests
-
-      - name: Run content match tests
-        run: pytest tests/test_links.py::TestContentCorrespondence -v --tb=short
-        env:
-          # CI: fixed seed for reproducible sampling
-          PYTHONHASHSEED: "42"
+          if-no-files-found: error
+          retention-days: 14

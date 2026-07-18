@@ -1,39 +1,39 @@
-"""
-Energy-Efficient Beamforming Design for ISAC Systems
-=====================================================
+"""Validated equation-level reference slice for energy-efficient ISAC."""
 
-Implementation of algorithms from:
-Zou, Sun, Masouros, Cui - IEEE Trans. Commun., 2024
-
-Modules:
-    system_model: ISAC system model (SINR, channels, steering vectors)
-    ee_metrics: Energy efficiency metrics (EE_C, EE_S, CRB)
-    dinkelbach_solver: Dinkelbach method for fractional programming
-    quadratic_transform: Quadratic transform for log-SINR terms
-    sdr_solver: Semidefinite relaxation with rank-1 recovery
-    sca_solver: Successive convex approximation solver
-    schur_complement: Schur complement for LMI constraints
-    pareto_optimizer: Pareto boundary search (Algorithm 4)
-    baselines: Baseline schemes for comparison
-"""
-
-from .system_model import ISACSystemModel
-from .ee_metrics import compute_ee_c, compute_ee_s, compute_crb, compute_sinr
-from .dinkelbach_solver import DinkelbachSolver
-from .pareto_optimizer import ParetoOptimizer
-from .baselines import EMaxBaseline, FixBeamBaseline, RandomBaseline
+from .dinkelbach_solver import (
+    DinkelbachIteration,
+    DinkelbachResult,
+    InfeasibleReferenceProblem,
+    SingleUserPowerDinkelbach,
+)
+from .ee_metrics import (
+    compute_crb,
+    compute_crb_point_target,
+    compute_ee_c,
+    compute_ee_s,
+    compute_sinr,
+    compute_sum_rate,
+    compute_total_power,
+    point_target_information_terms,
+)
+from .system_model import ISACSystemModel, PaperParameterProvenance, dbm_to_watt
 
 __all__ = [
+    "DinkelbachIteration",
+    "DinkelbachResult",
     "ISACSystemModel",
+    "InfeasibleReferenceProblem",
+    "PaperParameterProvenance",
+    "SingleUserPowerDinkelbach",
+    "compute_crb",
+    "compute_crb_point_target",
     "compute_ee_c",
     "compute_ee_s",
-    "compute_crb",
     "compute_sinr",
-    "DinkelbachSolver",
-    "ParetoOptimizer",
-    "EMaxBaseline",
-    "FixBeamBaseline",
-    "RandomBaseline",
+    "compute_sum_rate",
+    "compute_total_power",
+    "dbm_to_watt",
+    "point_target_information_terms",
 ]
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

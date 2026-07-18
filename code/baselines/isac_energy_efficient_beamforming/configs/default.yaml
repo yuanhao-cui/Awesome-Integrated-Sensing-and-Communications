@@ -1,75 +1,28 @@
-# Default Configuration for ISAC Energy-Efficient Beamforming
-# ============================================================
-
-# System Parameters (Section VI)
+---
+schema_version: 1
+claim: equation-level-single-user-fixed-direction
 system:
-  M: 16                  # Number of transmit antennas
-  K: 4                   # Number of communication users
-  N: 20                  # Number of receive antennas for sensing
-  L: 30                  # Frame length
-  wavelength: 1.0        # Signal wavelength (normalized)
-  d: 0.5                 # Antenna spacing (wavelengths)
-
-# Power Parameters
+  M: 4
+  K: 1
+  N: 5
+  L: 30
+  wavelength: 1.0
+  spacing_wavelengths: 0.5
 power:
-  P_max_dbm: 30          # Maximum transmit power (dBm)
-  P0_dbm: 33             # Circuit power (dBm)
-  epsilon: 0.35          # PA efficiency
-
-# Noise Parameters
-noise:
-  sigma_c_db: -80        # Communication noise power (dB)
-  sigma_s_db: -80        # Sensing noise power (dB)
-
-# Target Parameters
+  P_max_dbm: 30.0
+  P0_dbm: 30.0
+  epsilon: 0.35
+noise_assumptions:
+  sigma_c_dbm: -20.0
+  sigma_s_dbm: -10.0
 target:
-  angle_deg: 90          # Target angle (degrees)
-  type: "point"          # Target type: "point" or "extended"
-
-# Solver Parameters
+  angle_deg: 90.0
+  reflection_magnitude: 1.0
+synthetic_channel:
+  distribution: CN(0,1)
+  seed: 20260717
 solver:
-  name: "MOSEK"          # Primary solver
-  fallback: "SCS"        # Fallback solver
-  max_iterations: 100    # Maximum iterations
-  tolerance: 1e-4        # Convergence tolerance
-  verbose: false         # Print solver output
-
-# Dinkelbach Parameters (Algorithm 1)
-dinkelbach:
-  max_iter: 30           # Maximum Dinkelbach iterations
-  max_inner_iter: 20     # Maximum inner SCA iterations
-  tol_outer: 1e-4        # Outer convergence tolerance
-  tol_inner: 1e-5        # Inner convergence tolerance
-
-# SCA Parameters
-sca:
-  max_iter: 50           # Maximum SCA iterations
-  tolerance: 1e-4        # SCA convergence tolerance
-  penalty_growth: 1.5    # Penalty parameter growth rate
-
-# Pareto Parameters (Algorithm 4)
-pareto:
-  n_points: 20           # Number of Pareto boundary points
-
-# Baselines
-baselines:
-  random_trials: 100     # Number of random trials
-  sensing_fractions: [0.0, 0.3, 0.5, 0.7, 1.0]
-
-# Simulation Settings
-simulation:
-  n_channel_realizations: 100   # Monte Carlo trials
-  seed: 42                      # Random seed
-  save_figures: true            # Save generated figures
-  figure_format: "png"          # Figure format (png, pdf, eps)
-
-# Constraint Settings
-constraints:
-  gamma_min: null        # Minimum SINR (null = no constraint)
-  crb_max: null          # Maximum CRB (null = no constraint)
-
-# Output Settings
-output:
-  directory: "./results" # Output directory
-  save_beamforming: true # Save beamforming matrices
-  save_metrics: true     # Save all metrics
+  residual_tolerance: 1.0e-12
+  maximum_iterations: 100
+oracle:
+  dense_grid_points: 500001

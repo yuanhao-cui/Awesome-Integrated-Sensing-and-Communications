@@ -2,13 +2,12 @@
 
 import numpy as np
 import pytest
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
-from csi_ratio import compute_csi_ratio, compute_csi_ratio_multi
-from signal_model import csi_with_doppler
+from ..src.csi_ratio import (
+    compute_csi_ratio,
+    compute_csi_ratio_multi,
+    compute_csi_ratio_robust,
+)
+from ..src.signal_model import csi_signal_model, csi_static_dynamic_model, csi_with_doppler
 
 
 def test_csi_ratio_basic():
@@ -20,6 +19,15 @@ def test_csi_ratio_basic():
 
     expected = np.array([1 + 1j, 1 + 1j, 1 + 1j])
     np.testing.assert_allclose(R, expected, atol=1e-10)
+
+
+def test_maximum_finite_complex_components_have_unit_ratio():
+    amplitude = 1.7e308
+    value = np.array([amplitude + 1j * amplitude])
+    np.testing.assert_array_equal(compute_csi_ratio(value, value), np.ones(1))
+    robust, mask = compute_csi_ratio_robust(value, value)
+    np.testing.assert_array_equal(robust, np.ones(1))
+    np.testing.assert_array_equal(mask, np.ones(1, dtype=bool))
 
 
 def test_csi_ratio_cancels_offset():
@@ -57,12 +65,64 @@ def test_csi_ratio_multi():
     M = 3  # 3 antennas
     H = np.random.randn(N, M) + 1j * np.random.randn(N, M)
 
-    R = compute_csi_ratio_multi(H)
+    R = compute_csi_ratio_multi(H, ref_antenna=0)
 
     assert R.shape == (N, M - 1)
-    for i in range(M - 1):
-        expected = H[:, i] / H[:, i + 1]
-        np.testing.assert_allclose(R[:, i], expected, atol=1e-10)
+    np.testing.assert_allclose(R[:, 0], H[:, 1] / H[:, 0], atol=1e-10)
+    np.testing.assert_allclose(R[:, 1], H[:, 2] / H[:, 0], atol=1e-10)
+
+    ref_two = compute_csi_ratio_multi(H, ref_antenna=2)
+    assert not np.allclose(R, ref_two)
+    np.testing.assert_allclose(ref_two[:, 0], H[:, 0] / H[:, 2], atol=1e-10)
+
+
+def test_zero_reference_csi_is_rejected():
+    with pytest.raises(ValueError, match="zero/near-zero"):
+        compute_csi_ratio(np.ones(8, dtype=complex), np.zeros(8, dtype=complex))
+
+
+def test_unrepresentable_finite_quotient_is_rejected_without_warning():
+    numerator = np.full(4, 1.0e308 + 0.0j)
+    denominator = np.full(4, 1.0e-308 + 0.0j)
+    with pytest.raises(ValueError, match="finite binary64"):
+        compute_csi_ratio(numerator, denominator)
+
+
+def test_robust_ratio_validates_and_preserves_complex_dtype():
+    ratio, mask = compute_csi_ratio_robust(
+        np.array([1.0, 2.0]),
+        np.array([0.0, 1.0]),
+        threshold_db=-30.0,
+    )
+    np.testing.assert_array_equal(mask, [False, True])
+    assert np.issubdtype(ratio.dtype, np.complexfloating)
+    np.testing.assert_array_equal(ratio, [0.0 + 0.0j, 2.0 + 0.0j])
+
+    all_masked, all_mask = compute_csi_ratio_robust(
+        np.ones(3), np.zeros(3), threshold_db=0.0
+    )
+    assert not np.any(all_mask)
+    np.testing.assert_array_equal(all_masked, np.zeros(3, dtype=complex))
+
+    with pytest.raises(ValueError, match="threshold_db"):
+        compute_csi_ratio_robust(np.ones(3), np.ones(3), threshold_db=1.0)
+    with pytest.raises(ValueError, match="equal shape"):
+        compute_csi_ratio_robust(np.ones(3), np.ones(2))
+
+    underflow_threshold, underflow_mask = compute_csi_ratio_robust(
+        np.ones(2), np.array([1.0, 0.0]), threshold_db=-10000.0
+    )
+    np.testing.assert_array_equal(underflow_mask, [True, False])
+    np.testing.assert_array_equal(underflow_threshold, [1.0 + 0.0j, 0.0 + 0.0j])
+
+
+def test_robust_ratio_rejects_unrepresentable_retained_quotient():
+    with pytest.raises(ValueError, match="finite binary64"):
+        compute_csi_ratio_robust(
+            np.full(3, 1.0e308),
+            np.full(3, 1.0e-308),
+            threshold_db=0.0,
+        )
 
 
 def test_csi_ratio_preserves_phase_difference():
@@ -79,6 +139,71 @@ def test_csi_ratio_preserves_phase_difference():
     # All samples should have the same phase = phase_diff
     phases = np.angle(R)
     np.testing.assert_allclose(phases, phase_diff, atol=1e-10)
+
+
+def test_static_dynamic_model_ratio_is_mobius_and_cancels_shared_offset():
+    t = np.arange(200) * 0.001
+    static = np.array([1.0 + 0.2j, 0.8 - 0.1j])
+    dynamic = np.array([0.35 - 0.15j, -0.2 + 0.25j])
+    H = csi_static_dynamic_model(
+        t,
+        17.0,
+        static,
+        dynamic,
+        shared_offset_hz=123.0,
+    )
+    ratio = compute_csi_ratio(H[:, 0], H[:, 1])
+    z = np.exp(1j * 2 * np.pi * 17.0 * t)
+    expected = (static[0] + dynamic[0] * z) / (static[1] + dynamic[1] * z)
+    np.testing.assert_allclose(ratio, expected, atol=1e-12)
+    assert np.ptp(np.unwrap(np.angle(ratio))) > 1.0
+
+
+def test_general_model_doppler_does_not_cancel_from_ratio():
+    t = np.arange(256) * 0.001
+    H = csi_signal_model(t, v_r=0.4)
+    ratio = compute_csi_ratio(H[:, 1], H[:, 0])
+    assert np.std(ratio) > 1e-3
+
+
+def test_seeded_signal_noise_is_reproducible():
+    t = np.arange(64) * 0.001
+    first = csi_with_doppler(t, 20.0, snr_db=10.0, rng=np.random.default_rng(7))
+    second = csi_with_doppler(t, 20.0, snr_db=10.0, rng=np.random.default_rng(7))
+    np.testing.assert_array_equal(first[0], second[0])
+    np.testing.assert_array_equal(first[1], second[1])
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [
+        lambda: csi_static_dynamic_model(
+            np.array([0.0, 1.0, 2.0]),
+            1e308,
+            np.array([1.0, 2.0]),
+            np.array([1.0, 2.0]),
+        ),
+        lambda: csi_with_doppler(np.array([0.0, 1.0, 2.0]), 1e308),
+        lambda: csi_signal_model(np.array([0.0, 1.0, 2.0]), d0=1e200),
+        lambda: csi_signal_model(
+            np.array([0.0, 1.0, 2.0]), f_c=1e308, v_r=1e308
+        ),
+    ],
+)
+def test_unreliable_numeric_domains_are_rejected_without_overflow(builder):
+    with pytest.raises(ValueError, match="phase|path scale|Doppler"):
+        builder()
+
+
+@pytest.mark.parametrize("snr_db", [-1e308, 1e308])
+def test_noise_rejects_unrepresentable_linear_snr(snr_db):
+    with pytest.raises(ValueError, match="linear SNR"):
+        csi_with_doppler(
+            np.array([0.0, 0.01, 0.02]),
+            1.0,
+            snr_db=snr_db,
+            rng=np.random.default_rng(3),
+        )
 
 
 if __name__ == "__main__":

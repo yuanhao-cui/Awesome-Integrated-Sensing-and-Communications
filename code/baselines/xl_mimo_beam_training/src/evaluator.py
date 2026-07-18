@@ -4,23 +4,17 @@ Evaluation metrics and testing pipeline for beam training.
 Provides comprehensive evaluation including spectral efficiency,
 beamforming gain, normalized MSE, and visualization.
 
-Reference:
-    Evaluation setup from Section V of the paper.
+The metrics are repository diagnostics, not a paper-parity certificate.
 """
 
 import logging
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 
 from .model import BeamTrainingNet
 from .utils import (
-    generate_synthetic_data,
-    load_channel_data,
     load_checkpoint,
     prepare_input_features,
     rate_func,
@@ -30,13 +24,23 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
+def _channel_matrix(values: np.ndarray, num_antennas: int, name: str) -> np.ndarray:
+    """Return a batch-first channel matrix without collapsing batch size one."""
+    matrix = np.asarray(values)
+    if matrix.ndim == 1:
+        matrix = matrix.reshape(1, -1)
+    if matrix.ndim != 2 or matrix.shape[1] != num_antennas:
+        raise ValueError(f"{name} must have shape (samples, {num_antennas})")
+    return matrix
+
+
 class Evaluator:
     """Evaluation pipeline for the beam training model.
 
     Computes multiple metrics across different SNR regimes:
     - Spectral efficiency (achievable rate in bps/Hz)
     - Beamforming gain |h^H v|^2
-    - Normalized MSE between predicted and optimal beamforming vectors
+    - Phase-aligned MSE against the normalized full-digital channel direction
     - Rate vs SNR curves
 
     Args:
@@ -74,8 +78,9 @@ class Evaluator:
         if snr_range is None:
             snr_range = list(range(-20, 21, 5))
 
+        H_true = _channel_matrix(H, self.num_antennas, "H")
+        H_est = _channel_matrix(H_est, self.num_antennas, "H_est")
         H_input = prepare_input_features(H_est)
-        H_true = np.squeeze(H)
 
         H_input_t = torch.tensor(H_input, dtype=torch.float32).to(self.device)
         H_true_t = torch.tensor(H_true, dtype=torch.complex64).to(self.device)
@@ -92,7 +97,12 @@ class Evaluator:
                     (H_true_t.shape[0], 1), snr_linear, dtype=torch.float32
                 ).to(self.device)
 
-                loss = rate_func(H_true_t, outputs, snr_tensor)
+                loss = rate_func(
+                    H_true_t,
+                    outputs,
+                    snr_tensor,
+                    num_antennas=self.num_antennas,
+                )
                 avg_rate = -torch.mean(loss).item()
                 rates.append(avg_rate)
                 logger.info(f"SNR: {snr_dB} dB, Rate: {avg_rate:.4f} bps/Hz")
@@ -113,9 +123,10 @@ class Evaluator:
         Returns:
             Array of beamforming gains of shape (num_samples,).
         """
+        H_true = _channel_matrix(H, self.num_antennas, "H")
+        H_est = _channel_matrix(H_est, self.num_antennas, "H_est")
         H_input = prepare_input_features(H_est)
         H_input_t = torch.tensor(H_input, dtype=torch.float32).to(self.device)
-        H_true = np.squeeze(H)
 
         self.model.eval()
         with torch.no_grad():
@@ -130,10 +141,11 @@ class Evaluator:
         H: np.ndarray,
         H_est: np.ndarray,
     ) -> float:
-        """Compute normalized MSE between predicted and MRT beamforming vectors.
+        """Compute phase-aligned MSE against the full-digital channel direction.
 
-        Compares the predicted beamforming vector against the maximum ratio
-        transmission (MRT) optimal vector v_mrt = h / ||h||.
+        The reference ``h / ||h||`` is the unconstrained full-digital
+        channel direction. It is not a feasible constant-modulus analog
+        beamformer when channel magnitudes differ.
 
         Args:
             H: Perfect CSI of shape (num_samples, Nt), complex.
@@ -142,22 +154,34 @@ class Evaluator:
         Returns:
             Average normalized MSE.
         """
+        H_true = _channel_matrix(H, self.num_antennas, "H")
+        H_est = _channel_matrix(H_est, self.num_antennas, "H_est")
         H_input = prepare_input_features(H_est)
         H_input_t = torch.tensor(H_input, dtype=torch.float32).to(self.device)
-        H_true = np.squeeze(H)
 
-        # Optimal MRT beamforming
+        # Unit-norm full-digital channel direction.
         norms = np.linalg.norm(H_true, axis=1, keepdims=True)
-        v_opt = H_true / norms  # (N, Nt)
+        if np.any(norms == 0):
+            raise ValueError("H must not contain zero channel vectors")
+        v_reference = H_true / norms  # (N, Nt)
 
         self.model.eval()
         with torch.no_grad():
             phases = self.model(H_input_t)
             v_pred = trans_vrf(phases).cpu().numpy()  # (N, Nt)
 
-        # Normalized MSE
-        diff = np.abs(v_pred - v_opt) ** 2
-        mse = np.mean(np.sum(diff, axis=1) / self.num_antennas)
+        v_pred /= np.linalg.norm(v_pred, axis=1, keepdims=True)
+
+        # A beamforming vector is unchanged by a common phase rotation.  Align
+        # that phase per sample before comparing the two unit-norm vectors.
+        phase_inner = np.sum(np.conj(v_pred) * v_reference, axis=1, keepdims=True)
+        phase = np.ones_like(phase_inner)
+        nonzero = np.abs(phase_inner) > 1e-12
+        phase[nonzero] = phase_inner[nonzero] / np.abs(phase_inner[nonzero])
+        v_pred_aligned = v_pred * phase
+
+        squared_error = np.sum(np.abs(v_pred_aligned - v_reference) ** 2, axis=1)
+        mse = np.mean(squared_error)
         return float(mse)
 
     def evaluate_all_metrics(

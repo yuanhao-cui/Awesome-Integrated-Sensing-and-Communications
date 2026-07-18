@@ -2,24 +2,20 @@
 Tests for Quadratic Transform
 ==============================
 
-Tests for the quadratic transform for log-SINR optimization.
+Tests for the exact Eq. (14) log-SINR quadratic transform.
 
 Reference: Zou et al., IEEE Trans. Commun., 2024 (Eq. 14)
 """
 
-import sys
-import os
 import numpy as np
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from src.system_model import ISACSystemModel
-from src.quadratic_transform import (
+from ..src.ee_metrics import compute_sum_rate
+from ..src.system_model import ISACSystemModel
+from ..src.quadratic_transform import (
     quadratic_transform_objective,
     optimize_t,
     compute_sum_rate_quadratic,
-    QuadraticTransform,
 )
 
 
@@ -32,7 +28,8 @@ class TestQuadraticTransform:
         model = ISACSystemModel(M=8, K=3, N=10, seed=42)
         H = model.get_csi()
         sigma_c2 = model.sigma_c2
-        W = np.random.randn(8, 3) + 1j * np.random.randn(8, 3)
+        rng = np.random.default_rng(202407)
+        W = rng.standard_normal((8, 3)) + 1j * rng.standard_normal((8, 3))
         W *= 0.1  # Scale down
         return H, W, sigma_c2
 
@@ -52,13 +49,13 @@ class TestQuadraticTransform:
         for k in range(K):
             h_k = H[k, :]
             hw_k = h_k.conj() @ W[:, k]
-            total_power_k = sigma_c2 + sum(
-                np.abs(h_k.conj() @ W[:, j]) ** 2 for j in range(K)
+            interference_plus_noise = sigma_c2 + sum(
+                np.abs(h_k.conj() @ W[:, j]) ** 2
+                for j in range(K)
+                if j != k
             )
-
-            if total_power_k > 1e-15:
-                expected_t = hw_k / total_power_k
-                np.testing.assert_allclose(t[k], expected_t, rtol=1e-10)
+            expected_t = hw_k / interference_plus_noise
+            np.testing.assert_allclose(t[k], expected_t, rtol=1e-12)
 
     def test_quadratic_transform_objective(self, system_data):
         """Test quadratic transform objective is finite."""
@@ -67,12 +64,8 @@ class TestQuadraticTransform:
         obj = quadratic_transform_objective(H, W, t, sigma_c2)
         assert np.isfinite(obj)
 
-    def test_quadratic_transform_upper_bound(self, system_data):
-        """
-        Test quadratic transform provides upper bound on sum rate.
-
-        At optimal t, the quadratic transform value equals the sum rate.
-        """
+    def test_transform_equals_sum_rate_at_optimal_t(self, system_data):
+        """Eq. (14) must equal the direct sum rate at the Eq. (15) t."""
         H, W, sigma_c2 = system_data
         t = optimize_t(H, W, sigma_c2)
         qt_obj = quadratic_transform_objective(H, W, t, sigma_c2)
@@ -89,29 +82,59 @@ class TestQuadraticTransform:
             sinr_k = signal / (sigma_c2 + interference)
             sum_rate += np.log2(1 + sinr_k)
 
-        # At optimal t, these should match (within tolerance)
-        # The quadratic transform is a lower bound approximation
-        assert qt_obj <= sum_rate + 1e-6 or abs(qt_obj - sum_rate) < 0.1
+        np.testing.assert_allclose(qt_obj, sum_rate, rtol=1e-12, atol=1e-12)
+
+    def test_nonoptimal_t_is_a_strict_lower_bound(self, system_data):
+        """Moving away from Eq. (15) must lower the transformed rate."""
+        H, W, sigma_c2 = system_data
+        optimal_t = optimize_t(H, W, sigma_c2)
+        optimal_value = quadratic_transform_objective(
+            H, W, optimal_t, sigma_c2
+        )
+        perturbed_value = quadratic_transform_objective(
+            H, W, 0.5 * optimal_t, sigma_c2
+        )
+        assert perturbed_value < optimal_value
 
     def test_compute_sum_rate_quadratic(self, system_data):
         """Test sum rate computation via quadratic transform."""
         H, W, sigma_c2 = system_data
         sum_rate = compute_sum_rate_quadratic(H, W, sigma_c2)
-        assert sum_rate >= 0
-        assert np.isfinite(sum_rate)
+        direct_rate = 0.0
+        for user in range(H.shape[0]):
+            desired = abs(H[user].conj() @ W[:, user]) ** 2
+            interference = sum(
+                abs(H[user].conj() @ W[:, other]) ** 2
+                for other in range(H.shape[0])
+                if other != user
+            )
+            direct_rate += np.log2(1.0 + desired / (sigma_c2 + interference))
+        np.testing.assert_allclose(sum_rate, direct_rate, rtol=1e-12)
 
-    def test_quadratic_transform_class(self, system_data):
-        """Test QuadraticTransform class."""
-        H, _, sigma_c2 = system_data
-        qt = QuadraticTransform(H, sigma_c2)
+    def test_quadratic_transform_preserves_sub_epsilon_snr(self):
+        """The exact transform must retain the rate at SINR=1e-20."""
 
-        W_init = np.random.randn(8, 3) + 1j * np.random.randn(8, 3)
-        W_init *= 0.1
+        H = np.array([[1.0e-10 + 0.0j]])
+        W = np.array([[1.0 + 0.0j]])
+        expected = 1.4426950408889633e-20
+        assert compute_sum_rate_quadratic(H, W, 1.0) == pytest.approx(
+            expected, rel=6e-16, abs=0.0
+        )
 
-        W_opt, obj_val = qt.solve(W_init, max_iter=5)
+    def test_reduced_optimum_avoids_transient_quadratic_overflow(self):
+        H = np.array([[1.0e154 + 0.0j]])
+        W = np.array([[1.0 + 0.0j]])
+        expected = float(np.log1p(1.0e308) / np.log(2.0))
+        transformed = compute_sum_rate_quadratic(H, W, 1.0)
+        direct = compute_sum_rate(H, W, 1.0)
+        np.testing.assert_allclose(transformed, expected, rtol=2e-15, atol=0)
+        np.testing.assert_array_equal(transformed, direct)
 
-        assert W_opt.shape == (8, 3)
-        assert np.isfinite(obj_val)
+    def test_invalid_shape_fails_explainably(self, system_data):
+        """Shape errors must not leak through as opaque NumPy failures."""
+        H, W, sigma_c2 = system_data
+        with pytest.raises(ValueError, match="W must have shape"):
+            optimize_t(H, W[:-1], sigma_c2)
 
     def test_t_k_zero_when_no_signal(self):
         """Test t_k is zero when signal is zero."""

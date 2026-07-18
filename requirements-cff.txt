@@ -1,0 +1,4 @@
+# Exact direct constraint for the isolated CFF 1.2 schema-validation group.
+# cffconvert 2.0.0 requires jsonschema<4, so this group is intentionally
+# isolated from the Draft 2020-12 authority-metadata validation environment.
+cffconvert==2.0.0

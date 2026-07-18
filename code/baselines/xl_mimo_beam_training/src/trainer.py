@@ -5,7 +5,7 @@ Handles data loading, training loop, validation, checkpointing,
 and learning rate scheduling.
 
 Reference:
-    Training procedure from Section IV-B of the paper.
+    Paper-inspired training procedure for the educational surrogate.
 """
 
 import logging
@@ -14,7 +14,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
@@ -62,12 +61,17 @@ class Trainer:
         Returns:
             Initialized BeamTrainingNet model.
         """
-        self.model = BeamTrainingNet(
-            in_channels=self.config.get("in_channels", 1),
-            out_channels=self.config.get("out_channels", 1),
-            init_features=self.config.get("init_features", 8),
-            antenna_count=self.config.get("num_antennas", 256),
-        ).to(self.device)
+        seed = self.config.get("seed", 42)
+        if not isinstance(seed, (int, np.integer)):
+            raise ValueError("seed must be an integer")
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(int(seed))
+            self.model = BeamTrainingNet(
+                in_channels=self.config.get("in_channels", 1),
+                out_channels=self.config.get("out_channels", 1),
+                init_features=self.config.get("init_features", 8),
+                antenna_count=self.config.get("num_antennas", 256),
+            ).to(self.device)
 
         self.optimizer = optim.Adam(
             self.model.parameters(),
@@ -93,11 +97,13 @@ class Trainer:
     ) -> Tuple[DataLoader, DataLoader]:
         """Load and prepare training/validation data.
 
-        Attempts to load from .mat files first; falls back to synthetic data.
+        Loads MAT files when ``data_path`` is given. Synthetic data is used
+        only when ``data_path`` is omitted, so corrupt or mistyped user paths
+        cannot be silently replaced by a different experiment.
 
         Args:
             data_path: Path to directory with pcsi.mat and ecsi.mat.
-                If None or files not found, generates synthetic data.
+                If None, generates synthetic data.
 
         Returns:
             Tuple of (train_loader, val_loader).
@@ -105,31 +111,43 @@ class Trainer:
         batch_size = self.config.get("batch_size", 100)
         val_split = self.config.get("val_split", 0.1)
         num_antennas = self.config.get("num_antennas", 256)
+        seed = self.config.get("seed", 42)
+        if not isinstance(batch_size, int) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+        if not np.isfinite(val_split) or not 0 < val_split < 1:
+            raise ValueError("val_split must lie strictly between zero and one")
+        if not isinstance(seed, (int, np.integer)):
+            raise ValueError("seed must be an integer")
 
-        # Try loading real data
-        H, H_est = None, None
-        if data_path is not None:
-            H, H_est = load_channel_data(data_path)
-
-        # Fall back to synthetic data
-        if H is None or H_est is None:
+        if data_path is None:
             num_samples = self.config.get("num_synthetic_samples", 5000)
             logger.info(f"Generating synthetic data ({num_samples} samples)...")
             H, H_est = generate_synthetic_data(
                 num_samples=num_samples,
                 num_antennas=num_antennas,
-                seed=self.config.get("seed", 42),
+                seed=seed,
             )
+        else:
+            H, H_est = load_channel_data(data_path)
 
         # Prepare input features: (N, 1, 2, Nt)
         H_input = prepare_input_features(H_est)
-        H_true = np.squeeze(H)  # (N, Nt)
+        H_true = np.asarray(H)
+        if H_true.ndim == 1:
+            H_true = H_true.reshape(1, -1)
+        if H_true.ndim != 2 or H_true.shape[1] != num_antennas:
+            raise ValueError(
+                f"H must have shape (samples, {num_antennas})"
+            )
 
         # Generate random SNR values per sample (as in original)
         num_samples = H_true.shape[0]
+        if num_samples < 2:
+            raise ValueError("training/validation split requires at least two samples")
+        rng = np.random.default_rng(seed)
         snr_values = np.power(
             10.0,
-            np.random.randint(-20, 20, size=(num_samples, 1)).astype(np.float32) / 10.0,
+            rng.integers(-20, 20, size=(num_samples, 1)).astype(np.float32) / 10.0,
         )
 
         # Convert to tensors
@@ -144,11 +162,15 @@ class Trainer:
         train_data, val_data = random_split(
             dataset,
             [train_size, val_size],
-            generator=torch.Generator().manual_seed(self.config.get("seed", 42)),
+            generator=torch.Generator().manual_seed(int(seed)),
         )
 
+        loader_generator = torch.Generator().manual_seed(int(seed))
         self.train_loader = DataLoader(
-            train_data, batch_size=batch_size, shuffle=True
+            train_data,
+            batch_size=batch_size,
+            shuffle=True,
+            generator=loader_generator,
         )
         self.val_loader = DataLoader(
             val_data, batch_size=batch_size, shuffle=False
@@ -191,7 +213,12 @@ class Trainer:
 
                 self.optimizer.zero_grad()
                 outputs = self.model(inputs)
-                loss = rate_func(targets, outputs, snr_values)
+                loss = rate_func(
+                    targets,
+                    outputs,
+                    snr_values,
+                    num_antennas=targets.shape[-1],
+                )
                 loss = torch.mean(loss)
                 loss.backward()
                 running_loss += loss.item()
@@ -255,7 +282,12 @@ class Trainer:
                 snr_values = snr_values.to(self.device)
 
                 outputs = self.model(inputs)
-                loss = rate_func(targets, outputs, snr_values)
+                loss = rate_func(
+                    targets,
+                    outputs,
+                    snr_values,
+                    num_antennas=targets.shape[-1],
+                )
                 loss = torch.mean(loss)
                 val_loss += loss.item()
 

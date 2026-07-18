@@ -1,0 +1,109 @@
+---
+schema_version: 1
+baseline: isac_capacity_distortion
+reference:
+  doi: 10.1109/TIT.2023.3284449
+  manuscript: https://arxiv.org/abs/2204.06938
+evidence_level: educational-surrogate
+paper_figure_parity: false
+model: >-
+  Gaussian MIMO covariance rate, generic BFIM and CRB, known-unit-gain ULA
+  angle information, water filling, and a local log-determinant surrogate.
+assumptions:
+  - Total covariance trace equals power per transmitter times transmitter count.
+  - Communication rate is reported in nats per channel use.
+  - The local angle model has fixed angle, known unit gain, and one path.
+  - Communication coefficients are normalized by sqrt(noise variance) before products.
+  - The certificate uses a seeded two-mode synthetic diagonal channel.
+parameters:
+  seed: 20260717
+  paper_anchors:
+    transmit_antennas: 10
+    sensing_receive_antennas: 10
+    communication_receive_antennas: 1
+    array_spacing_wavelengths: 0.5
+    max_sensing_receive_snr_db_per_antenna: 20
+    max_communication_receive_snr_db_per_antenna: 33
+    angle_prior_distribution: von-Mises
+    angle_prior_mean_degrees: 30
+    angle_prior_standard_deviation_degrees: 5
+    figure_scenario_communication_bearing_degrees: 42
+    figure_scenario_coherent_interval: 3
+    reported_subspace_overlap: approximately-0.61
+  dynamic_range_channels:
+    - extreme-scale channel/noise pair
+    - representable subnormal Gram eigenvalues
+    - 1.0e154 scalar channel for the covariance-surrogate quadratic root
+numeric_domain:
+  arithmetic: IEEE-754 binary64
+  guarantees:
+    - scale-safe BFIM scaling
+    - direct received-waveform rate evaluation
+    - ratio-scaled covariance-surrogate quadratic root
+    - explicit geometry-domain rejection before phase construction
+  rejected:
+    - nonrepresentable Hermitian sums, Gram products, or received waveforms
+    - array phases outside the declared reliable-cycle domain
+oracle:
+  type: dense-grid-analytic-and-active-set
+  expected:
+    water_filling_matches_500001_point_grid: true
+    covariance_surrogate_matches_grid_and_kkt: true
+    diagonal_bfim_crb_and_siso_rate_match_closed_form: true
+    subnormal_gain_active_set_is_correct: true
+    invalid_or_unrepresentable_domains_are_explicit: true
+tolerances:
+  dense_grid_steps: 1.1
+  objective_absolute: 1.0e-10
+  kkt_absolute: 2.0e-12
+  analytic_absolute: 2.0e-14
+  dynamic_range_relative: 2.0e-15
+  subnormal_gain_relative: 1.0e-12
+  steering_derivative_relative: 1.0e-8
+  physical_constraint_absolute: 2.0e-12
+evidence:
+  command: >-
+    python -m
+    code.baselines.isac_capacity_distortion.examples.verify_surrogate --json
+  certificate_checks:
+    - bfim_analytic
+    - bfim_scale_safe
+    - crb_analytic
+    - dynamic_range_scaling
+    - physical_postconditions
+    - received_waveform_cancellation_permutation_invariant
+    - received_waveform_rate_scale_safe
+    - seed_repeatability
+    - siso_rate_analytic
+    - steering_derivative
+    - subnormal_gain_scaling
+    - surrogate_discriminant_scale_safe
+    - surrogate_power_gain_product_scale_safe
+    - surrogate_grid_objective
+    - surrogate_grid_power
+    - surrogate_kkt
+    - unrepresentable_outputs_are_explicit
+    - water_grid_objective
+    - water_grid_power
+    - weak_information_is_finite
+  checks:
+    - 500001-point simplex grid for water filling
+    - 500001-point simplex grid and KKT residual for covariance surrogate
+    - closed-form diagonal BFIM, CRB, weak-information CRB, and SISO rate
+    - extreme-scale channel/noise water-filling and rate oracle
+    - subnormal-gain active-set water-filling and positive-rate oracle
+    - overflow-free covariance-surrogate root at squared gain 1.0e308
+    - >-
+      finite two-mode KKT solution when power budget times gain exceeds binary64
+    - explicit CRB-infinity and oversized-power-budget checks
+    - central finite-difference ULA steering derivative
+    - seeded bitwise-repeatability check
+    - scale-safe BFIM scaling across extreme finite channel amplitudes
+    - direct received-waveform rate without an overflowing Gram intermediate
+    - explicit geometry-domain rejection before phase construction
+limitations:
+  - The paper unknown-gain nuisance-parameter Bayesian angle FIM is absent.
+  - Paper prior averaging, fading ensembles, and overlap coefficient are absent.
+  - No published curve or signaling theorem is numerically certified.
+  - Noise-normalized coefficients, energies, and total trace must fit binary64.
+  - CRB values beyond binary64 are represented by positive infinity.

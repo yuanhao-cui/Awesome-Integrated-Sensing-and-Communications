@@ -1,6 +1,6 @@
 # Data Preparation
 
-## Required Files
+## Optional local files
 
 Place the following `.mat` files in this directory (or specify path via `data_path` in config):
 
@@ -14,17 +14,27 @@ Place the following `.mat` files in this directory (or specify path via `data_pa
 ## Data Format
 
 Each row represents one channel realization between the XL-MIMO base station
-and a user. The channel is modeled using the spherical wave near-field model
-described in the paper.
+and a user. A caller supplying these files is responsible for documenting the
+channel model, normalization, split, provenance, and usage rights; the file
+names alone do not establish that they are paper data.
 
 ## Synthetic Data
 
-If real data is not available, the code automatically generates synthetic
-near-field channel data using the spherical wave model. See `generate_synthetic_data()` in `src/utils.py`.
+The default runnable path generates seeded synthetic near-field channels using
+`generate_synthetic_data()` in `src/utils.py`. Those samples are repository
+test data, not measurements or paper-result data.
 
-## Download
+## Public-source boundary
 
-Data is generated using the MATLAB scripts from the original repository:
-https://github.com/yuanhao-cui/near-field-beamforming-using-deeplearning
+The first author's public repository is
+[fly-winder/near-field-beamforming-using-deeplearning](https://github.com/fly-winder/near-field-beamforming-using-deeplearning).
+At the audited revision it did not contain `pcsi.mat`, `ecsi.mat`, a training
+dataset directory, or MATLAB data-generation scripts, and it did not include a
+standard open-source license. Its training-script hyperparameters also differ
+from the paper's Table III. It is therefore linked for provenance only; this
+repository neither copies its artifacts nor labels locally generated samples
+as author data.
 
-Run the MATLAB channel generation scripts first, then transfer the `.mat` files here.
+The paper does not disclose the exact channel realizations used for its figures.
+Supplying private `.mat` files creates a separate experiment and requires a new
+provenance and comparison record before any paper-parity claim.

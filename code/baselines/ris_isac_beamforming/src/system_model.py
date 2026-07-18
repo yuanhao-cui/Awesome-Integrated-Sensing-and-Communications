@@ -1,17 +1,26 @@
-"""RIS-ISAC system model.
+"""Internally consistent synthetic RIS-ISAC system model.
 
 Defines the physical layer model including:
 - Received signal at users (communication)
 - Reflected signal for radar sensing
 - SINR, SNR, and rate computations
 
-Reference: Section III.A, Eq. (4)-(7) in
-    Rang Liu et al., IEEE TWC 2024, arXiv:2301.11134.
+The model is an educational narrowband surrogate.  It uses a column-channel
+convention throughout: :meth:`effective_channel` returns ``h_k`` and every
+received projection is evaluated as ``h_k^H w`` using :func:`numpy.vdot`.
 """
 
 import numpy as np
 from typing import Optional
 from .channel_model import RISChannelModel
+from .numerics import (
+    db_to_linear,
+    normalize_unit_phases,
+    stable_effective_channel,
+    stable_link_rate,
+    stable_link_sinr,
+    stable_sensing_snr,
+)
 
 
 class RIS_ISAC_System:
@@ -24,8 +33,8 @@ class RIS_ISAC_System:
         M: BS antennas.
         K: Single-antenna users.
         L: RIS elements.
-        P_max: Maximum transmit power (mW).
-        noise_power: Noise variance (mW).
+        P_max: Maximum transmit power (W).
+        noise_power: Noise variance (W).
         sinr_thresh_dB: SINR threshold in dB.
         channels: Dictionary of channel matrices.
         theta: RIS phase shift vector (L,) with |theta_l| = 1.
@@ -47,18 +56,29 @@ class RIS_ISAC_System:
             M: Number of BS antennas.
             K: Number of single-antenna users.
             L: Number of RIS elements.
-            P_max: Maximum transmit power in mW (Table I: 10 mW).
-            noise_power: Noise variance in mW (Table I: 3.98e-12 mW).
-            sinr_thresh_dB: SINR threshold in dB (Table I: 10 dB).
+            P_max: Maximum transmit power in W (default 0.01 W).
+            noise_power: Noise variance in W (default 3.98e-12 W).
+            sinr_thresh_dB: Local communication SINR threshold in dB.
             seed: Random seed for channel generation.
         """
+        for name, value in (("M", M), ("K", K), ("L", L)):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if not np.isfinite(P_max) or P_max <= 0:
+            raise ValueError("P_max must be finite and positive")
+        if not np.isfinite(noise_power) or noise_power <= 0:
+            raise ValueError("noise_power must be finite and positive")
+        if not np.isfinite(sinr_thresh_dB):
+            raise ValueError("sinr_thresh_dB must be finite")
         self.M = M
         self.K = K
         self.L = L
         self.P_max = P_max
         self.noise_power = noise_power
         self.sinr_thresh_dB = sinr_thresh_dB
-        self.sinr_thresh = 10 ** (sinr_thresh_dB / 10)
+        self.sinr_thresh = db_to_linear(
+            sinr_thresh_dB, "sinr_thresh_dB"
+        )
 
         # Generate channels
         channel_model = RISChannelModel(M=M, K=K, L=L, seed=seed)
@@ -70,8 +90,6 @@ class RIS_ISAC_System:
     def ris_diagonal_matrix(self) -> np.ndarray:
         """Construct RIS diagonal matrix Θ = diag(θ).
 
-        See Eq. (1): Θ = diag(θ_1, ..., θ_L) with |θ_l| = 1.
-
         Returns:
             Diagonal matrix Θ of shape (L, L).
         """
@@ -80,10 +98,8 @@ class RIS_ISAC_System:
     def effective_channel(self, user_idx: int) -> np.ndarray:
         """Compute effective channel for user k.
 
-        The effective channel combines direct and RIS-reflected paths:
-            h_k^eff = g_k^H Θ H_BR + h_{d,k}^H
-
-        See Eq. (2): h_k^H = g_k^H Θ H_BR + h_{d,k}^H
+        The stored row coefficients are returned as a column-vector channel
+        ``h_k``.  Received projections are always ``h_k^H w``.
 
         Args:
             user_idx: User index k (0-based).
@@ -91,63 +107,83 @@ class RIS_ISAC_System:
         Returns:
             Effective channel vector of shape (M,).
         """
-        H_BR = self.channels["H_BR"]  # (L, M)
-        G = self.channels["G"]  # (K, L)
-        h_d = self.channels["h_d"]  # (K, M)
+        if not 0 <= user_idx < self.K:
+            raise IndexError(f"user_idx must be in [0, {self.K})")
+        return stable_effective_channel(
+            self.channels["h_d"][user_idx],
+            self.channels["G"][user_idx],
+            self.channels["H_BR"],
+            self.theta,
+        )
 
-        Theta = self.ris_diagonal_matrix()
-        h_eff = G[user_idx, :] @ Theta @ H_BR + h_d[user_idx, :]
-        return h_eff
-
-    def compute_sinr(self, w_k: np.ndarray, W_interf: np.ndarray) -> float:
+    def compute_sinr(
+        self, user_idx: int, w_k: np.ndarray, W_interf: np.ndarray
+    ) -> float:
         """Compute SINR for a user given beamforming vectors.
 
         SINR_k = |h_k^H w_k|^2 / (Σ_{j≠k} |h_k^H w_j|^2 + σ^2)
 
-        See Eq. (5).
-
         Args:
+            user_idx: Zero-based user index defining the effective channel.
             w_k: Beamforming vector for user k (M,).
             W_interf: Stacked interference beamformers (M, K-1).
 
         Returns:
             SINR value (linear scale).
         """
-        # This is a helper; the actual SINR computation uses effective channel
-        # Called by the solver with the effective channel
-        pass
+        if not 0 <= user_idx < self.K:
+            raise IndexError(f"user_idx must be in [0, {self.K})")
+        w_k = np.asarray(w_k, dtype=complex)
+        W_interf = np.asarray(W_interf, dtype=complex)
+        if w_k.shape != (self.M,):
+            raise ValueError(f"w_k must have shape ({self.M},)")
+        if W_interf.ndim != 2 or W_interf.shape[0] != self.M:
+            raise ValueError(f"W_interf must have shape ({self.M}, J)")
+        if not np.all(np.isfinite(w_k)) or not np.all(np.isfinite(W_interf)):
+            raise ValueError("beamformers must be finite")
+        return stable_link_sinr(
+            self.channels["h_d"][user_idx],
+            self.channels["G"][user_idx],
+            self.channels["H_BR"],
+            self.theta,
+            w_k,
+            W_interf,
+            self.noise_power,
+        )
 
-    def compute_snr_sensing(self, w: np.ndarray) -> float:
-        """Compute radar sensing SNR.
+    def compute_snr_sensing(self, W: np.ndarray) -> float:
+        """Compute radar sensing SNR for independent unit-variance streams.
 
-        SNR_s = |h_s^H w|^2 / σ^2
+        SNR_s = h_s^H W W^H h_s / σ^2
+              = Σ_k |h_s^H w_k|^2 / σ^2
 
-        where h_s is the sensing channel through RIS.
-
-        See Eq. (6).
+        where ``h_s`` is the sensing channel through the RIS and the columns of
+        ``W`` multiply mutually independent, unit-variance data symbols.
 
         Args:
-            w: Total beamforming vector (M,) = Σ_k w_k.
+            W: Beamforming matrix (M, K), one data stream per column.
 
         Returns:
             Sensing SNR (linear scale).
         """
-        a_bs = self.channels["a_bs"]  # (M,)
-        a_ris = self.channels["a_ris"]  # (L,)
-        H_BR = self.channels["H_BR"]  # (L, M)
-        Theta = self.ris_diagonal_matrix()
-
-        # Round-trip sensing channel
-        h_s = a_bs + (a_ris.T @ Theta @ H_BR)
-        snr = np.abs(h_s.conj() @ w) ** 2 / self.noise_power
-        return snr
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.M, self.K) or not np.all(np.isfinite(W)):
+            raise ValueError(
+                f"W must be a finite matrix of shape {(self.M, self.K)}"
+            )
+        return stable_sensing_snr(
+            self.channels["a_bs"],
+            self.channels["a_ris"],
+            self.channels["H_BR"],
+            self.theta,
+            W,
+            self.noise_power,
+        )
 
     def compute_sum_rate(self, W: np.ndarray) -> float:
         """Compute sum rate over all users.
 
         R_k = log2(1 + SINR_k), Sum rate = Σ_k R_k
-
-        See Eq. (4).
 
         Args:
             W: Beamforming matrix of shape (M, K), columns are w_k.
@@ -155,34 +191,35 @@ class RIS_ISAC_System:
         Returns:
             Sum rate in bits/s/Hz.
         """
-        H_BR = self.channels["H_BR"]
-        G = self.channels["G"]
-        h_d = self.channels["h_d"]
-        Theta = self.ris_diagonal_matrix()
-
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.M, self.K) or not np.all(np.isfinite(W)):
+            raise ValueError(f"W must be a finite matrix of shape {(self.M, self.K)}")
         sum_rate = 0.0
         for k in range(self.K):
-            h_k = G[k, :] @ Theta @ H_BR + h_d[k, :]  # effective channel (M,)
+            interferers = np.delete(W, k, axis=1)
+            sum_rate += stable_link_rate(
+                self.channels["h_d"][k],
+                self.channels["G"][k],
+                self.channels["H_BR"],
+                self.theta,
+                W[:, k],
+                interferers,
+                self.noise_power,
+            )
+        return float(sum_rate)
 
-            signal_power = np.abs(h_k.conj() @ W[:, k]) ** 2
-            interference = 0.0
-            for j in range(self.K):
-                if j != k:
-                    interference += np.abs(h_k.conj() @ W[:, j]) ** 2
-            sinr_k = signal_power / (interference + self.noise_power)
-            sum_rate += np.log2(1 + sinr_k)
-
-        return sum_rate
-
-    def set_ris_phases(self, theta: np.ndarray):
+    def set_ris_phases(self, theta: np.ndarray) -> None:
         """Set RIS phase shifts with unit-modulus enforcement.
 
         Args:
             theta: Complex phase vector (L,). Will be normalized to |θ_l| = 1.
         """
-        self.theta = theta / np.abs(theta)
+        theta = np.asarray(theta, dtype=complex)
+        if theta.shape != (self.L,):
+            raise ValueError(f"theta must have shape ({self.L},)")
+        self.theta = normalize_unit_phases(theta)
 
-    def reset_channels(self, seed: Optional[int] = None):
+    def reset_channels(self, seed: Optional[int] = None) -> None:
         """Regenerate all channel matrices.
 
         Args:

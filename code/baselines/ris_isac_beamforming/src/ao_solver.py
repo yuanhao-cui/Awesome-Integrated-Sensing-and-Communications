@@ -1,126 +1,78 @@
-"""Alternating Optimization (AO) solver for RIS-ISAC.
+"""Unified interface for the supported RIS feasibility surrogate."""
 
-Unified interface that dispatches to SNR-constrained or CRB-constrained
-solvers based on the problem type. Coordinates the AO loop between
-beamforming and RIS phase optimization.
+from __future__ import annotations
 
-Reference: Section IV-V, Algorithm 1 in
-    Rang Liu et al., IEEE TWC 2024, arXiv:2301.11134.
-"""
+from typing import Literal
 
 import numpy as np
-from typing import Optional, Literal
 
-from .system_model import RIS_ISAC_System
-from .beamforming import BeamformingOptimizer
-from .ris_phase import RISPhaseOptimizer
 from .snr_constraint import SNRConstrainedSolver
-from .crb_constraint import CRBConstrainedSolver
+from .system_model import RIS_ISAC_System
+from .numerics import stable_squared_norm
 
 
 class AlternatingOptimizationSolver:
-    """Unified alternating optimization solver for RIS-ISAC.
+    """Dispatch the supported SNR-constrained feasibility iteration.
 
-    Supports two problem formulations:
-    1. SNR-constrained (target detection)
-    2. CRB-constrained (parameter estimation)
-
-    Attributes:
-        system: RIS-ISAC system model.
-        problem_type: 'snr' or 'crb'.
-        max_iter: Maximum AO iterations.
-        tol: Convergence tolerance.
+    The earlier ``problem_type='crb'`` path was removed because its scalar
+    derivative proxy was not the paper's two-angle, nuisance-RCS Fisher
+    information model.  Unsupported scientific models fail explicitly.
     """
 
     def __init__(
         self,
         system: RIS_ISAC_System,
-        problem_type: Literal["snr", "crb"] = "snr",
+        problem_type: Literal["snr"] = "snr",
         snr_min_dB: float = 5.0,
-        crb_max: float = 1e-2,
         max_iter: int = 50,
         tol: float = 1e-4,
-    ):
-        """Initialize AO solver.
-
-        Args:
-            system: RIS-ISAC system instance.
-            problem_type: 'snr' for detection, 'crb' for estimation.
-            snr_min_dB: Minimum radar SNR (dB) for SNR-constrained.
-            crb_max: Maximum CRB for CRB-constrained.
-            max_iter: Maximum AO iterations.
-            tol: Convergence tolerance.
-        """
+        **unsupported: object,
+    ) -> None:
+        if problem_type != "snr":
+            raise ValueError(
+                "Only problem_type='snr' is supported; the former CRB proxy "
+                "was not the cited paper's CRB model"
+            )
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise TypeError(f"unsupported arguments for the SNR surrogate: {names}")
         self.system = system
         self.problem_type = problem_type
         self.max_iter = max_iter
         self.tol = tol
-
-        if problem_type == "snr":
-            self._solver = SNRConstrainedSolver(
-                system, snr_min_dB=snr_min_dB, max_iter=max_iter, tol=tol
-            )
-        elif problem_type == "crb":
-            self._solver = CRBConstrainedSolver(
-                system, crb_max=crb_max, max_iter=max_iter, tol=tol
-            )
-        else:
-            raise ValueError(f"Unknown problem_type: {problem_type}. Use 'snr' or 'crb'.")
+        self._solver = SNRConstrainedSolver(
+            system,
+            snr_min_dB=snr_min_dB,
+            max_iter=max_iter,
+            tol=tol,
+        )
 
     def solve(self) -> dict:
-        """Run the alternating optimization algorithm.
+        """Return a post-validated local-surrogate solution."""
 
-        Returns:
-            Solution dictionary with optimized beamforming, RIS phases,
-            and performance metrics.
-
-        For SNR-constrained:
-            'sum_rate', 'snr_sensing', 'W', 'theta', 'converged'
-
-        For CRB-constrained:
-            'sum_rate', 'crb', 'W', 'theta', 'converged'
-        """
         return self._solver.solve()
 
     def evaluate(self, W: np.ndarray, theta: np.ndarray) -> dict:
-        """Evaluate solution metrics for given W and θ.
+        """Evaluate power, rate, SINR, and sensing SNR for one tuple."""
 
-        Args:
-            W: Beamforming matrix (M, K).
-            theta: RIS phase vector (L,).
-
-        Returns:
-            Dictionary of metrics: sum_rate, sinr_per_user, snr_sensing, crb.
-        """
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.system.M, self.system.K):
+            raise ValueError(
+                f"W must have shape {(self.system.M, self.system.K)}"
+            )
         self.system.set_ris_phases(theta)
-        w_total = np.sum(W, axis=1)
-
-        results = {
+        sinrs = []
+        for user in range(self.system.K):
+            interferers = np.delete(W, user, axis=1)
+            sinrs.append(
+                self.system.compute_sinr(user, W[:, user], interferers)
+            )
+        return {
             "sum_rate": self.system.compute_sum_rate(W),
-            "snr_sensing": self.system.compute_snr_sensing(w_total),
-            "power_used": np.sum(np.linalg.norm(W, axis=0) ** 2),
-            "sinr_per_user": [],
+            "snr_sensing": self.system.compute_snr_sensing(W),
+            "power_used": stable_squared_norm(W),
+            "sinr_per_user": np.asarray(sinrs),
         }
 
-        # Per-user SINR
-        H_BR = self.system.channels["H_BR"]
-        G = self.system.channels["G"]
-        h_d = self.system.channels["h_d"]
-        Theta = self.system.ris_diagonal_matrix()
-        sigma2 = self.system.noise_power
 
-        for k in range(self.system.K):
-            h_k = G[k, :] @ Theta @ H_BR + h_d[k, :]
-            signal = np.abs(h_k.conj() @ W[:, k]) ** 2
-            interf = sum(
-                np.abs(h_k.conj() @ W[:, j]) ** 2
-                for j in range(self.system.K)
-                if j != k
-            )
-            sinr_k = signal / (interf + sigma2)
-            results["sinr_per_user"].append(sinr_k)
-
-        if self.problem_type == "crb":
-            results["crb"] = self._solver.compute_crb(w_total)
-
-        return results
+__all__ = ["AlternatingOptimizationSolver"]

@@ -1,0 +1,80 @@
+---
+schema_version: 1
+baseline: ofdm_ambiguity_function
+reference:
+  kind: foundational-radar-and-communication-theory
+  scope: discrete narrowband ambiguity-function definition
+evidence_level: educational-surrogate
+paper_figure_parity: false
+model: >-
+  Direct discrete ambiguity-power evaluation for one seeded finite OFDM symbol
+  and one rectangularly weighted discrete LFM chirp.
+assumptions:
+  - Delay inputs are unique integer sample shifts.
+  - Doppler inputs are in hertz and use the explicitly supplied sample rate.
+  - Range uses the conventional two-way c over 2B cell with c equal to 3e8 m/s.
+  - Results describe one symbol realization and grid, not an ensemble average.
+parameters:
+  seed: 20260717
+  subcarriers: 32
+  cyclic_prefix_samples: 8
+  modulation_order: 4
+  lfm_bandwidth_hz: 2.0e7
+  lfm_pulse_width_second: 1.0e-5
+  lfm_sample_rate_hz: 4.0e7
+  amplitude_scale_regression:
+    - 1.0e-200
+    - 1.0e-160
+    - 1.0
+    - 1.0e160
+    - 1.0e200
+  maximum_finite_complex_component_regression: 1.7e308
+  finite_extreme_doppler_hz: 1.0e308
+  finite_extreme_sample_rate_hz: 5.0e-324
+  default_lfm_max_samples: 1000000
+oracle:
+  type: exact-normalization-and-closed-form-conventions
+  expected:
+    ambiguity_power_at_origin: 1.0
+    ideal_lfm_papr_linear: 1.0
+    range_resolution_at_20mhz_m: 7.5
+    seeded_symbol_repeatability: bitwise
+    normalized_metrics_are_amplitude_scale_invariant: true
+    maximum_finite_complex_components_are_scale_safe: true
+    Doppler_is_periodic_modulo_sample_rate: true
+    range_resolution_at_1e308_hz_m: 1.5e-300
+tolerances:
+  ambiguity_origin_absolute: 1.0e-14
+  lfm_papr_absolute: 1.0e-14
+  range_resolution_absolute_m: 1.0e-14
+  amplitude_scale_invariance_absolute: 5.0e-16
+  Doppler_periodicity_absolute: 2.0e-15
+evidence:
+  command: >-
+    python scripts/verify_simulation_baseline.py
+    ofdm_ambiguity_function --json
+  certificate_checks:
+    - ambiguity_power_origin_is_one
+    - ambiguity_cancellation_tail_is_preserved
+    - doppler_is_periodic_modulo_sample_rate
+    - ideal_lfm_has_unit_linear_papr
+    - large_finite_bandwidth_is_scale_safe
+    - maximum_finite_complex_components_are_scale_safe
+    - normalized_metrics_are_scale_invariant
+    - range_uses_two_way_c_over_2b
+    - seeded_ofdm_is_bitwise_repeatable
+  checks:
+    - normalized ambiguity power at zero delay and Doppler
+    - compensated correlation preserving a representable cross-scale power tail
+    - bitwise seeded OFDM repeatability
+    - ideal discrete LFM constant-envelope PAPR
+    - independent c over 2B arithmetic
+    - ambiguity power and PAPR under five extreme nonzero amplitude scales
+    - ambiguity origin and PAPR with 1.7e308 real and imaginary components
+    - modulo-sample-rate Doppler reduction without overflow
+    - explicit rejection when a reciprocal resolution is not finite binary64
+    - pre-allocation rejection of nonfinite or oversized LFM sample counts
+limitations:
+  - No symbol-independent OFDM ambiguity envelope is claimed.
+  - Fractional-delay interpolation and channel effects are absent.
+  - Generated figures do not reproduce a paper result.

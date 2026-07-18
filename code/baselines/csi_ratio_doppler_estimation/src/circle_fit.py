@@ -1,192 +1,145 @@
+"""Algebraic circle fitting for complex CSI-ratio samples.
+
+The fitted parameters solve
+
+``min sum_i (x_i**2 + y_i**2 - 2 A x_i - 2 B y_i - C)**2``
+
+and ``r = sqrt(C + A**2 + B**2)``.  This is an algebraic residual,
+not the geometric-distance objective.
 """
-Circle Fitting for CSI-Ratio Samples.
 
-Implements Eq. (11) from the paper - least-squares circle fit.
-
-When the CSI-ratio R(t) = H_m(t)/H_{m+1}(t) is plotted in the complex
-plane, the samples lie on a circle. This module finds the circle
-parameters (center and radius).
-
-The circle equation in the complex plane:
-    |R - C_0|^2 = r^2
-    where C_0 = A + jB is the center, r is the radius.
-
-Expanding (Eq. 11):
-    R_i = x_i + j*y_i
-    x_i^2 + y_i^2 = 2*A*x_i + 2*B*y_i + C
-    where C = r^2 - A^2 - B^2
-
-This is a linear least-squares problem in (A, B, C).
-"""
+from typing import Tuple
 
 import numpy as np
-from typing import Tuple
+
+
+def _circle_system(R: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Validate samples and return the algebraic design system."""
+    samples = np.asarray(R, dtype=complex)
+    if samples.ndim != 1 or samples.size < 3 or not np.all(np.isfinite(samples)):
+        raise ValueError("R must be a finite one-dimensional array with at least 3 samples")
+    x = samples.real
+    y = samples.imag
+    design = np.column_stack([2.0 * x, 2.0 * y, np.ones(samples.size)])
+    if np.linalg.matrix_rank(design) < 3:
+        raise ValueError("circle fit is degenerate; samples must not be constant or collinear")
+    target = x**2 + y**2
+    return design, target
+
+
+def _normalize_samples(R: np.ndarray) -> Tuple[np.ndarray, complex, float]:
+    """Center by the sample mean and scale by spread before fitting.
+
+    Scaling only by ``max(abs(R))`` leaves the algebraic radius calculation
+    ill-conditioned when a small identifiable circle is far from the origin.
+    The two-stage scaling also keeps the mean calculation finite for large
+    inputs.
+    """
+    samples = np.asarray(R, dtype=complex)
+    if samples.ndim != 1 or samples.size < 3 or not np.all(np.isfinite(samples)):
+        raise ValueError("R must be a finite one-dimensional array with at least 3 samples")
+    global_scale = float(np.max(np.abs(samples)))
+    if global_scale <= 0:
+        raise ValueError("circle fit is degenerate; samples must not be constant")
+    globally_scaled = samples / global_scale
+    offset_scaled = complex(np.mean(globally_scaled))
+    centered = globally_scaled - offset_scaled
+    spread_scaled = float(np.max(np.abs(centered)))
+    if spread_scaled <= np.finfo(float).eps:
+        raise ValueError("circle fit is degenerate; samples must not be constant")
+    offset = offset_scaled * global_scale
+    spread = spread_scaled * global_scale
+    return centered / spread_scaled, offset, spread
+
+
+def _parameters_from_solution(theta: np.ndarray) -> Tuple[float, float, float]:
+    A, B, C = (float(value) for value in theta)
+    radius_squared = C + A**2 + B**2
+    scale = max(abs(C), A**2 + B**2, np.finfo(float).tiny)
+    if not np.isfinite(radius_squared) or radius_squared <= np.finfo(float).eps * scale:
+        raise ValueError("circle fit has zero or invalid radius")
+    return A, B, float(np.sqrt(radius_squared))
 
 
 def least_squares_circle_fit(R: np.ndarray) -> Tuple[float, float, float]:
-    """
-    Fit a circle to complex samples using least-squares (Eq. 11).
-
-    Solves the linear system:
-        x_i^2 + y_i^2 = 2*A*x_i + 2*B*y_i + C
-
-    in the least-squares sense, where:
-        C_0 = A + jB  (circle center)
-        r = sqrt(C + A^2 + B^2)  (circle radius)
-
-    Parameters
-    ----------
-    R : np.ndarray
-        Complex CSI-ratio samples, shape (N,).
-
-    Returns
-    -------
-    A : float
-        Real part of circle center.
-    B : float
-        Imaginary part of circle center.
-    r : float
-        Circle radius.
-
-    Notes
-    -----
-    This is the primary circle fitting method from Eq. (11) of the paper.
-    The center C_0 = A + jB is used to shift the circle to the origin
-    before computing the Doppler estimate.
-    """
-    x = np.real(R)
-    y = np.imag(R)
-
-    # Build the design matrix for: x^2 + y^2 = 2*A*x + 2*B*y + C
-    # Stack as: [2x, 2y, 1] @ [A, B, C]^T = x^2 + y^2
-    N = len(R)
-    A_matrix = np.column_stack([2 * x, 2 * y, np.ones(N)])
-    b = x ** 2 + y ** 2
-
-    # Solve least-squares: min ||A_matrix @ theta - b||^2
-    theta, residuals, rank, s = np.linalg.lstsq(A_matrix, b, rcond=None)
-
-    A_center = theta[0]
-    B_center = theta[1]
-    C_const = theta[2]
-
-    # Compute radius
-    r = np.sqrt(max(C_const + A_center ** 2 + B_center ** 2, 0))
-
-    return A_center, B_center, r
+    """Fit a circle by unweighted algebraic least squares."""
+    samples, offset, scale = _normalize_samples(R)
+    design, target = _circle_system(samples)
+    theta, _, rank, _ = np.linalg.lstsq(design, target, rcond=None)
+    if rank < 3:
+        raise ValueError("circle fit is rank deficient")
+    A, B, radius = _parameters_from_solution(theta)
+    return (
+        offset.real + A * scale,
+        offset.imag + B * scale,
+        radius * scale,
+    )
 
 
 def fit_circle_kasa(R: np.ndarray) -> Tuple[float, float, float]:
+    """Alias the same algebraic fit commonly called Kasa's method.
+
+    This function is retained to make the method name explicit.  It is
+    mathematically the same objective as :func:`least_squares_circle_fit`.
     """
-    Fit circle using Kasa's method (algebraic fit).
+    return least_squares_circle_fit(R)
 
-    Simpler but less accurate than least-squares for noisy data.
-    Included for comparison.
 
-    Parameters
-    ----------
-    R : np.ndarray
-        Complex CSI-ratio samples, shape (N,).
+def fit_circle_iterative_weighted(
+    R: np.ndarray,
+    max_iter: int = 50,
+    tolerance: float = 1e-10,
+) -> Tuple[float, float, float]:
+    """Iteratively reweight the algebraic residual by inverse radial distance.
 
-    Returns
-    -------
-    A : float
-        Real part of circle center.
-    B : float
-        Imaginary part of circle center.
-    r : float
-        Circle radius.
+    This local refinement is not a Pratt or Taubin constrained algebraic fit;
+    the descriptive name is intentional.
     """
-    x = np.real(R)
-    y = np.imag(R)
+    if not isinstance(max_iter, int) or max_iter < 1:
+        raise ValueError("max_iter must be a positive integer")
+    if not np.isfinite(tolerance) or tolerance <= 0:
+        raise ValueError("tolerance must be positive and finite")
+    samples, offset, sample_scale = _normalize_samples(R)
+    design, target = _circle_system(samples)
+    theta, _, rank, _ = np.linalg.lstsq(design, target, rcond=None)
+    if rank < 3:
+        raise ValueError("circle fit is rank deficient")
+    A, B, radius = _parameters_from_solution(theta)
 
-    # Kasa: minimize sum of (x^2 + y^2 - 2Ax - 2By - C)^2
-    M = np.column_stack([2 * x, 2 * y, np.ones(len(R))])
-    b = x ** 2 + y ** 2
-
-    theta = np.linalg.lstsq(M, b, rcond=None)[0]
-
-    A, B, C = theta
-    r = np.sqrt(max(C + A ** 2 + B ** 2, 0))
-    return A, B, r
-
-
-def fit_circle_pratt(R: np.ndarray, max_iter: int = 50) -> Tuple[float, float, float]:
-    """
-    Fit circle using Taubin-Pratt method (improved algebraic fit).
-
-    Better accuracy than Kasa, iterative refinement.
-
-    Parameters
-    ----------
-    R : np.ndarray
-        Complex CSI-ratio samples, shape (N,).
-    max_iter : int
-        Maximum iterations. Default: 50.
-
-    Returns
-    -------
-    A : float
-        Real part of circle center.
-    B : float
-        Imaginary part of circle center.
-    r : float
-        Circle radius.
-    """
-    x = np.real(R)
-    y = np.imag(R)
-    N = len(R)
-
-    # Start with Kasa estimate
-    A, B, r = fit_circle_kasa(R)
-
-    # Iterative refinement using geometric distances
     for _ in range(max_iter):
-        # Compute distances from current circle
-        dx = x - A
-        dy = y - B
-        dist = np.sqrt(dx ** 2 + dy ** 2)
-        dist = np.maximum(dist, 1e-15)
-
-        # Weights: closer points get higher weight
-        w = 1.0 / dist
-        w = w / np.sum(w)
-
-        # Weighted least-squares
-        W = np.diag(w)
-        M = np.column_stack([2 * x, 2 * y, np.ones(N)])
-        b = x ** 2 + y ** 2
-
-        theta = np.linalg.lstsq(M.T @ W @ M, M.T @ W @ b, rcond=None)[0]
-        A_new, B_new, C_new = theta
-        r_new = np.sqrt(max(C_new + A_new ** 2 + B_new ** 2, 0))
-
-        # Check convergence
-        if abs(A_new - A) < 1e-10 and abs(B_new - B) < 1e-10:
-            break
-
-        A, B, r = A_new, B_new, r_new
-
-    return A, B, r
+        distances = np.abs(samples - (A + 1j * B))
+        scale = max(float(np.max(distances)), np.finfo(float).tiny)
+        weights = 1.0 / np.maximum(distances, np.finfo(float).eps * scale)
+        sqrt_weights = np.sqrt(weights / np.sum(weights))
+        weighted_design = design * sqrt_weights[:, None]
+        weighted_target = target * sqrt_weights
+        theta, _, rank, _ = np.linalg.lstsq(weighted_design, weighted_target, rcond=None)
+        if rank < 3:
+            raise ValueError("weighted circle fit is rank deficient")
+        A_new, B_new, radius_new = _parameters_from_solution(theta)
+        if max(abs(A_new - A), abs(B_new - B), abs(radius_new - radius)) < tolerance:
+            return (
+                offset.real + A_new * sample_scale,
+                offset.imag + B_new * sample_scale,
+                radius_new * sample_scale,
+            )
+        A, B, radius = A_new, B_new, radius_new
+    return (
+        offset.real + A * sample_scale,
+        offset.imag + B * sample_scale,
+        radius * sample_scale,
+    )
 
 
 def circle_fit_error(R: np.ndarray, A: float, B: float, r: float) -> float:
-    """
-    Compute RMS error of circle fit.
-
-    Parameters
-    ----------
-    R : np.ndarray
-        Complex CSI-ratio samples.
-    A, B : float
-        Circle center coordinates.
-    r : float
-        Circle radius.
-
-    Returns
-    -------
-    rms_error : float
-        Root mean square error between sample distances and radius.
-    """
-    distances = np.abs(R - (A + 1j * B))
-    return np.sqrt(np.mean((distances - r) ** 2))
+    """Return the RMS geometric radial residual for a supplied circle."""
+    samples = np.asarray(R, dtype=complex)
+    if samples.ndim != 1 or samples.size == 0 or not np.all(np.isfinite(samples)):
+        raise ValueError("R must be a non-empty finite one-dimensional array")
+    if not all(np.isfinite(value) for value in (A, B, r)) or r <= 0:
+        raise ValueError("circle center must be finite and radius must be positive")
+    center = A + 1j * B
+    centered = samples - center
+    scale = max(float(np.max(np.abs(centered))), r)
+    distances = np.abs(centered / scale)
+    return float(np.sqrt(np.mean((distances - r / scale) ** 2)) * scale)

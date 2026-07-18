@@ -1,225 +1,144 @@
 # CSI-Ratio Doppler Frequency Estimation
 
-> Three algorithms for Doppler estimation in ISAC using CSI-ratio — the only approach that cancels CFO, TMO, and phase noise simultaneously.
+> Educational, synthetic-data implementation of one checked circle-phase rotation estimator.
 >
-> 📄 **Paper**: J. Andrew Zhang, **Yuanhao Cui**, et al., *"CSI-Ratio-based Doppler Frequency Estimation in Integrated Sensing and Communications,"* IEEE Transactions on Communications, 2024.
-> ✅ **Status**: 13/13 tests passing
+> 📄 **Reference**: Xinyu Li, J. Andrew Zhang, Kai Wu, Yuanhao Cui, and Xiaojun Jing, [“CSI-Ratio-Based Doppler Frequency Estimation in Integrated Sensing and Communications”](https://doi.org/10.1109/JSEN.2022.3208272), *IEEE Sensors Journal*, vol. 22, no. 21, pp. 20886–20895, 2022.
+>
+> **Evidence level**: educational surrogate. The checked-in figures use generated data. This baseline does not claim paper-figure, hardware-data, or exact algorithm parity.
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg?logo=python)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-13%2F13%20passing-brightgreen.svg)](./tests/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg?logo=python)](https://www.python.org/)
+[Tests](./tests/)
+[![License: CC BY-SA 4.0](https://img.shields.io/badge/license-CC%20BY--SA%204.0-lightgrey.svg)](../../../LICENSE)
 
----
+## Scope and model
 
-## 🎯 What This Implements
+If two antenna channels contain the same multiplicative receiver offset,
 
-In integrated sensing and communications (ISAC) systems, extracting Doppler frequency from Channel State Information (CSI) is fundamental for velocity estimation of users and targets. However, raw CSI measurements are corrupted by carrier frequency offset (CFO), timing misalignment offset (TMO), and phase noise — impairments that severely degrade traditional Doppler estimators.
+$$H_m(t) = \left(s_m+d_m z(t)\right)e^{j2\pi f_o t},\qquad
+z(t)=e^{j2\pi f_Dt},$$
 
-This baseline implements **CSI-ratio**, a technique that computes `R(t) = H_m(t) / H_{m+1}(t)` between adjacent antennas. Because these impairments are *common* across antennas, the ratio cancels them out entirely. What remains is a clean phase rotation whose rate directly encodes the Doppler frequency.
+their noiseless ratio cancels that common factor:
 
-We provide **three complementary algorithms** for extracting Doppler from the CSI-ratio trajectory:
+$$R_{mr}(t)=\frac{H_m(t)}{H_r(t)}
+=\frac{s_m+d_mz(t)}{s_r+d_rz(t)}.$$
 
-1. **Möbius Transformation-based (Primary)** ⭐ — Fits a circle to the CSI-ratio trajectory in the complex plane, then uses weighted linear regression on the phase angle. This is the *only* method that preserves the sign of Doppler (distinguishing approaching vs. receding targets).
+This is generally a Möbius trajectory, not a pure phase exponential. Cancellation applies only to a truly common multiplicative impairment; independent noise and antenna-dependent errors remain. The denominator must also stay away from zero.
 
-2. **Periodicity-based** — Detects zero-crossings in the phase angle to measure the oscillation period. Simple and robust, but only yields the magnitude `|f_D|`.
+The repository includes an algebraic circle fit followed by a weighted phase-slope fit. Earlier local cycle-crossing and lag-difference adapters were removed because they did not have enough evidence to distinguish incomplete/aperiodic arcs, and raw ratio phase does not complete a cycle when a Möbius circle fails to enclose the origin. The circle’s traversal speed is generally non-uniform. Stationary or degenerate trajectories are rejected rather than assigned a fabricated estimate.
 
-3. **Signal Difference-based** — Finds the lag `n*` that minimizes the average squared difference `Δ(n) = E[|R(k+n) - R(k)|²]`, giving `|f_D| = 1/(n* · T_s)`. Computationally light, resolution-limited by sampling rate.
+The estimator normalizes the ratio before the algebraic fit, making the checked
+result invariant to nonzero complex scales from `1e-100` through `1e100`.  It
+also enforces two validity conditions before returning a frequency: at least
+π radians of unwrapped fitted-circle coverage and weighted phase-linearity
+`R² >= 0.95`.  A general Möbius trajectory that traverses its circle too
+non-uniformly is rejected even when its physical Doppler is below Nyquist.
+Inputs whose numerator/reference quotient is not representable in finite
+binary64 are rejected explicitly. Magnitude screening and quotient evaluation
+use component-scaled arithmetic, so finite real and imaginary inputs up to the
+binary64 maximum are not rejected merely because an intermediate complex
+magnitude or square would overflow.
 
-The Möbius-based estimator maintains **sub-Hz accuracy** even at low SNR, making it suitable for practical ISAC deployments where both velocity magnitude and direction matter.
+The estimators report observed rotation frequency. Rotation sign alone does **not** identify approaching versus receding motion without a declared complex-exponential convention, geometry, and static/dynamic path-dominance condition. Therefore `direction` is returned as `"unknown"` and `rotation_sign` describes only the observed complex-plane rotation.
 
----
+Sampling also makes frequency ambiguous modulo the sampling rate. The result includes `alias_limit_hz = 1/(2*T_s)` and `alias_ambiguous = True`; callers must establish a below-Nyquist prior before interpreting the principal observed rotation as physical Doppler.
 
-## 📊 Results
+## Checked synthetic examples
 
-### Doppler Estimation Over Time
+These plots are generated from the exact pure-rotation unit-test construction
+in `csi_with_doppler`; they illustrate local numerical behavior, not measured
+performance, a comparison to the paper, or a ranking guarantee. B2 contains
+only the checked circle-phase estimator. B3 reports the accepted-trial
+fraction plus the median and interquartile range *conditional on passing the
+declared coverage/R² validity gate*, from 20 deterministic seeds
+(`100 * trial + 7`) at each SNR. Rejected trials are not silently converted to
+large errors or omitted from the denominator. The plot is a synthetic
+diagnostic, not an experimental confidence interval.
 
-Comparison of all three algorithms tracking a sinusoidally-varying Doppler (50 Hz, with sign changes). The Möbius-based method tracks both magnitude and sign; the other two only track magnitude.
+![Synthetic CSI-ratio circle](./results/B1_csi_ratio_circle.png)
 
-![Doppler Estimation Comparison](./results/p0b_doppler.png)
+![Synthetic windowed estimates](./results/B2_estimation_comparison.png)
 
-### Estimation Error vs. SNR
+![Synthetic error sweep](./results/B3_error_vs_snr.png)
 
-Median absolute error across 20 Monte Carlo trials per SNR level. The Möbius-based estimator achieves sub-Hz accuracy at SNR ≥ 15 dB.
+![Synthetic fitted trajectory](./results/B4_trajectory_circle_fit.png)
 
-![Error vs. SNR](./results/p0b_error_vs_snr.png)
+## Quick start
 
-### CSI-Ratio Circle in Complex Plane
-
-Synthetic CSI samples with known Doppler (50 Hz) form a perfect circle in the complex plane. The CSI-ratio cancels CFO, TMO, and phase noise, leaving a clean rotation.
-
-![CSI-Ratio Circle](./results/B1_csi_ratio_circle.png)
-
-### Doppler Estimation Comparison (Extended)
-
-Real-time tracking with a 100 ms sliding window. All three algorithms converge to the correct magnitude; only Algorithm 1 preserves direction.
-
-![Estimation Comparison](./results/B2_estimation_comparison.png)
-
-### Estimation Error vs. SNR (Extended)
-
-Per-algorithm error breakdown showing the Möbius estimator's superior robustness.
-
-![Error vs. SNR Extended](./results/B3_error_vs_snr.png)
-
-### CSI-Ratio Trajectory & Circle Fitting
-
-Visualization of the raw CSI-ratio trajectory (left) and the shifted circle used for Doppler extraction (right). The arrow indicates rotation direction corresponding to positive Doppler.
-
-![Trajectory & Circle Fitting](./results/B4_trajectory_circle_fit.png)
-
----
-
-## 🚀 Quick Start
+From the repository root, use the workflow-pinned uv 0.11.28 and the complete
+hashed lock:
 
 ```bash
-# 1. Navigate to the baseline
-cd code/baselines/csi_ratio_doppler_estimation
-
-# 2. Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# 3. Install dependencies
-pip install numpy matplotlib scipy
-
-# 4. Run all tests
-pytest tests/ -v
-
-# 5. Generate all figures from the paper
-python examples/generate_figures.py
+uv lock --check
+uv sync --locked --only-group ci
+.venv/bin/python -W error -m pytest code/baselines/csi_ratio_doppler_estimation/tests -v
+.venv/bin/python code/baselines/csi_ratio_doppler_estimation/examples/generate_figures.py
 ```
 
-Expected output: 13 tests pass, 6 PNG figures saved to `results/`.
-
-### Reproduce a Single Estimate
+### Exact unit-test oracle
 
 ```python
 import numpy as np
-from src.signal_model import csi_with_doppler
+
 from src.csi_ratio import compute_csi_ratio
 from src.mobius_estimator import mobius_doppler_estimate
+from src.signal_model import csi_with_doppler
 
-# Generate synthetic CSI with Doppler = 50 Hz
-t = np.arange(0, 0.5, 0.0005)  # 0.5 s, T_s = 0.5 ms
-H1, H2 = csi_with_doppler(t, f_D=50.0, snr_db=25.0)
-
-# Compute CSI-ratio and estimate Doppler
-R = compute_csi_ratio(H1, H2)
-result = mobius_doppler_estimate(R, T_s=0.0005)
-
-print(f"Estimated: {result['f_D']:.2f} Hz ({result['direction']})")
-# → Estimated: 50.03 Hz (approaching)
+t = np.arange(1000) * 0.0005
+H1, H2 = csi_with_doppler(
+    t,
+    f_D=50.0,
+    snr_db=25.0,
+    rng=np.random.default_rng(7),
+)
+ratio = compute_csi_ratio(H1, H2)
+result = mobius_doppler_estimate(ratio, T_s=0.0005)
+print(result["rotation_frequency_hz"], result["rotation_sign"], result["direction"])
 ```
 
----
+`csi_with_doppler` deliberately constructs a pure rotating ratio so tests have a known oracle. Use `csi_static_dynamic_model` for the general static-plus-dynamic Möbius form.
 
-## 📖 Mathematical Background
+## Implemented objectives
 
-### CSI-Ratio Definition
+The circle routine minimizes the algebraic residual
 
-For two adjacent antennas `m` and `m+1`, the CSI-ratio at time `t` is:
+$$\min_{A,B,C}\sum_k
+\left(x_k^2+y_k^2-2Ax_k-2By_k-C\right)^2,
+\qquad r=\sqrt{C+A^2+B^2}.$$
 
-$$R(t) = \frac{H_m(t)}{H_{m+1}(t)}$$
+This is not the geometric radial-distance objective and the optional iterative routine is an inverse-radial-distance reweighted algebraic fit, not a Pratt or Taubin fit.
 
-Since CFO `Δf`, TMO `τ`, and phase noise `φ(t)` are common across antennas, the ratio **cancels all three**:
+The phase adapter fits
 
-$$R(t) = \frac{\alpha_m}{\alpha_{m+1}} \exp\left(j \frac{2\pi f_D d \sin\theta}{c} t\right)$$
+$$\theta_k\approx\beta_0+\beta_1t_k,
+\qquad \widehat f_{\mathrm{rot}}=\frac{\beta_1}{2\pi}.$$
 
-where `f_D` is the Doppler frequency, `d` is antenna spacing, `θ` is the angle of arrival, and `c` is the speed of light.
+The fitted frequency is a windowed rotation proxy. It needs enough angular coverage and a below-Nyquist prior.
 
-### Algorithm 1: Circle Fitting + Phase Regression
+## Layout
 
-The CSI-ratio trajectory traces a circle in the complex plane centered at `C_0 = A + jB` with radius `r`. The circle is fitted via least-squares minimization:
-
-$$\min_{A, B, r} \sum_{k=1}^{N} \left( \sqrt{(R_k^{re} - A)^2 + (R_k^{im} - B)^2} - r \right)^2$$
-
-After shifting to origin `R_s(t) = R(t) - C_0`, the phase angle `θ_R(t) = \arg(R_s(t))` follows a linear trend:
-
-$$\theta_R(t) = \beta_0 + \beta_1 t$$
-
-The Doppler frequency is recovered as:
-
-$$\hat{f}_D = \frac{\beta_1}{2\pi}$$
-
-Weighted regression with weights `w_k = |R_s(t_k)|` improves robustness at low SNR by downweighting points near the origin where phase is noisy.
-
-### Algorithm 2: Zero-Crossing Detection
-
-The phase `γ(t) = \arg(R(t))` oscillates with period `T = 1/|f_D|`. By detecting zero-crossings relative to the starting angle, the period is estimated from the average cycle length `S` (in samples):
-
-$$|\hat{f}_D| = \frac{1}{S \cdot T_s}$$
-
-### Algorithm 3: Minimum-Difference Lag
-
-For each lag `n`, compute the average squared difference:
-
-$$\Delta(n) = \frac{1}{N-n} \sum_{k=1}^{N-n} |R(k+n) - R(k)|^2$$
-
-The optimal lag `n* = \arg\min_n \Delta(n)` corresponds to one full rotation, giving:
-
-$$|\hat{f}_D| = \frac{1}{n^* \cdot T_s}$$
-
----
-
-## 🏗️ Project Structure
-
-```
+```text
 csi_ratio_doppler_estimation/
-├── src/                              # Core implementation
-│   ├── __init__.py                  # Package exports
-│   ├── signal_model.py              # CSI signal generation (Eq. 2, 5)
-│   ├── csi_ratio.py                 # CSI-ratio computation (Eq. 6, 8)
-│   ├── mobius_estimator.py          # Algorithm 1: Möbius-based (signed)
-│   ├── periodicity_estimator.py     # Algorithm 2: Periodicity-based
-│   ├── difference_estimator.py      # Algorithm 3: Difference-based
-│   ├── circle_fit.py                # Circle fitting (Eq. 11)
-│   └── visualization.py             # Plotting utilities
-├── tests/                            # Unit tests (13 tests)
-│   ├── test_csi_ratio.py            # CSI-ratio cancellation & shape tests
-│   ├── test_mobius.py               # Möbius estimator accuracy tests
-│   └── test_circle_fit.py           # Circle fitting convergence tests
-├── examples/                         # Runnable scripts
-│   └── generate_figures.py          # Generate all paper figures
-├── configs/                          # Configuration files
-├── data/                             # Data directory (synthetic or .mat)
-├── results/                          # Generated figures
-│   ├── p0b_doppler.png              # Main: Doppler estimation over time
-│   ├── p0b_error_vs_snr.png         # Main: Error vs SNR
-│   ├── B1_csi_ratio_circle.png      # CSI-ratio circle in complex plane
-│   ├── B2_estimation_comparison.png # All-algorithm comparison
-│   ├── B3_error_vs_snr.png          # Extended error analysis
-│   └── B4_trajectory_circle_fit.png # Trajectory & circle fitting
-├── generate_figures.py               # Top-level figure generation script
-└── README.md                         # ← You are here
+├── src/
+│   ├── signal_model.py
+│   ├── csi_ratio.py
+│   ├── circle_fit.py
+│   └── mobius_estimator.py
+├── tests/
+├── examples/generate_figures.py
+└── results/
 ```
 
----
-
-## 📚 References
+## Citation
 
 ```bibtex
-@article{zhang2024csi,
-  title     = {CSI-Ratio-based Doppler Frequency Estimation in Integrated Sensing and Communications},
-  author    = {Zhang, J. Andrew and Cui, Yuanhao and others},
-  journal   = {IEEE Transactions on Communications},
-  year      = {2024},
-  publisher = {IEEE}
+@article{li2022csi,
+  title   = {CSI-Ratio-Based Doppler Frequency Estimation in Integrated Sensing and Communications},
+  author  = {Li, Xinyu and Zhang, J. Andrew and Wu, Kai and Cui, Yuanhao and Jing, Xiaojun},
+  journal = {IEEE Sensors Journal},
+  volume  = {22},
+  number  = {21},
+  pages   = {20886--20895},
+  year    = {2022},
+  doi     = {10.1109/JSEN.2022.3208272}
 }
 ```
-
-### Related Work
-
-```bibtex
-@article{cui2023isac,
-  title   = {Integrated Sensing and Communications Over the Years: An Evolution Perspective},
-  author  = {Zhang, Di and Cui, Yuanhao and others},
-  journal = {IEEE Communications Surveys \& Tutorials},
-  year    = {2026}
-}
-```
-
----
-
-<p align="center">
-  Part of <a href="https://github.com/yuanhao-cui/awesome-integrated-sensing-and-communications">awesome-integrated-sensing-and-communications</a>
-</p>

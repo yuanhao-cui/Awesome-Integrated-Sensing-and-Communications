@@ -1,35 +1,33 @@
-# 📊 Datasets & Benchmarks
+# Public Datasets Relevant to ISAC
 
-> Publicly available datasets for ISAC research.
+> Curated starting points, not a claim that every dataset contains a complete communication-and-sensing link. Source pages and the three explicitly reported scale summaries below were checked on 2026-07-18.
 
-## WiFi CSI Datasets
+## RF and multimodal human sensing
 
-| Dataset | Environment | Users | Actions/Classes | Modality | Download |
-|---------|-------------|-------|-----------------|----------|----------|
-| XRF55 | 4 env, 39 participants | 39 | 55 actions | WiFi CSI | [🔗](https://aiotgroup.github.io/XRF55/) |
-| Widar 3.0 | 3 env, 5 locations | 16 | 16 gestures | WiFi CSI | [🔗](https://tns.thss.tsinghua.edu.cn/widar3.0/) |
-| MM-Fi | 4 env | 40 | 27 actions | Multi-modal | [🔗](https://ntu-aiot-lab.github.io/mm-fi) |
-| SignFi | 2 env | 5 | 276 signs | WiFi CSI | [🔗](https://github.com/yongsen/SignFi) |
-| NTU-Fi HAR | 1 env | 20 | 6 actions | WiFi CSI | [🔗](https://github.com/xyanchen/WiFi-CSI-Sensing-Benchmark) |
-| WiAR | 3 env | 10 | 16 actions | CSI+RSSI | [🔗](https://github.com/linteresa/WiAR) |
-| OPERAnet | 2 env | 6 | 6 actions | Multi-modal | [🔗](https://springernature.figshare.com/collections/A_Comprehensive_Multimodal_Activity_Recognition_Dataset_Acquired_from_Radio_Frequency_and_Vision-Based_Sensors/5551209) |
+| Dataset | Source-supported content | Official project or repository |
+|---|---|---|
+| XRF55 | 42.9K synchronized RF samples; 55 classes; 39 subjects; four scenes; WiFi, RFID, mmWave, and Kinect modalities | [XRF55 project](https://aiotgroup.github.io/XRF55/) |
+| MM-Fi | More than 320K synchronized frames; five modalities; 40 subjects; 25 action categories | [MM-Fi project](https://ntu-aiot-lab.github.io/mm-fi) |
+| Widar 3.0 | WiFi CSI gesture data from 16 users, 15 gestures, 15 locations, five orientations, and three environments | [Widar 3.0 project](https://tns.thss.tsinghua.edu.cn/widar3.0/) |
+| SignFi | WiFi CSI sign-language recognition data and code | [SignFi repository](https://github.com/yongsen/SignFi) |
+| NTU-Fi | WiFi CSI data and benchmark code for human-activity recognition | [WiFi CSI sensing benchmark repository](https://github.com/xyanchen/WiFi-CSI-Sensing-Benchmark) |
+| WiAR | WiFi-based activity-recognition dataset and resources | [WiAR repository](https://github.com/linteresa/WiAR) |
+| OPERAnet | Multimodal activity-recognition collection using radio-frequency and vision-based sensors | [OPERAnet collection](https://springernature.figshare.com/collections/A_Comprehensive_Multimodal_Activity_Recognition_Dataset_Acquired_from_Radio_Frequency_and_Vision-Based_Sensors/5551209) |
 
-## Radar Datasets
+## Automotive and robotic radar datasets
 
-| Dataset | Sensor | Scale | Tasks | Download |
-|---------|--------|-------|-------|----------|
-| RadarScenes | 77GHz Radar | 158 scenes | Object Detection | [🔗](https://radar-scenes.com/) |
-| Oxford RobotCar | Radar/LiDAR/Camera | 320km | SLAM | [🔗](https://robotcar-dataset.robots.ox.ac.uk/) |
-| RADIATE | 77GHz Radar | 100+ sequences | Object Detection | [🔗](http://www.robots.ox.ac.uk/~mobile/wiki/index.html) |
-| nuScenes | Radar/LiDAR/Camera | 1000 scenes | Multi-task | [🔗](https://www.nuscenes.org/) |
+| Dataset | Modalities or task scope | Official project |
+|---|---|---|
+| RadarScenes | Automotive radar object-detection and tracking sequences | [RadarScenes](https://radar-scenes.com/) |
+| Oxford Radar RobotCar | Radar extension to the Oxford RobotCar autonomous-driving dataset | [Oxford Radar RobotCar](https://oxford-robotics-institute.github.io/radar-robotcar-dataset/) |
+| RADIATE | Radar, LiDAR, and camera data for adverse-weather road perception | [RADIATE](https://pro.hw.ac.uk/radiate/) |
+| nuScenes | Multisensor autonomous-driving dataset including radar, LiDAR, and cameras | [nuScenes](https://www.nuscenes.org/) |
 
-## Simulation Tools
+## Use and licensing boundary
 
-| Tool | Type | Link |
-|------|------|------|
-| MATLAB Radar Toolbox | Radar simulation | [🔗](https://www.mathworks.com/products/radar.html) |
-| Wireless InSite | Channel simulation | [🔗](https://www.remcom.com/wireless-insite) |
+- Read each source's license, terms of use, consent or privacy conditions, and citation instructions before downloading or redistributing data.
+- Verify units, coordinate frames, synchronization, calibration, train/test splits, and subject or scene independence before comparing methods.
+- A result is reproducible only when the exact dataset release, preprocessing, split, random seeds, metrics, and evaluation code are recorded.
+- Dataset statistics can change across versions; the project source is authoritative if it differs from this snapshot.
 
----
-
-*Contributions welcome! See [CONTRIBUTING.md](../CONTRIBUTING.md).*
+Contributions should follow the [curation and evidence policy](../CONTRIBUTING.md).

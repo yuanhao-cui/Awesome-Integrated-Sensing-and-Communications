@@ -1,0 +1,117 @@
+---
+schema_version: 1
+baseline: isac_resource_allocation
+reference:
+  doi: 10.1109/TWC.2022.3219463
+evidence_level: educational-surrogate
+paper_figure_parity: false
+model: >-
+  Seeded synthetic power-and-bandwidth allocation with a numerically stable
+  two-degree-of-freedom detector, dimensionally normalized localization
+  information bounds, a same-epoch tracking covariance recursion, per-user
+  Shannon-rate floors, and feasibility-first alternating local optimization.
+assumptions:
+  - Every communication and ISAC user must satisfy the local per-user rate floor.
+  - The detector statistic has two degrees of freedom and H1 scale 1 plus SNR.
+  - Range information uses allocated bandwidth, while angle information uses a
+    fixed 10 MHz noise-equivalent reference bandwidth.
+  - The localization score uses 1 m and 1 mrad reference scales so that its
+    range and angle terms are dimensionless before addition.
+  - Tracking predicts state and covariance to the same epoch, shares the
+    localization range-angle covariance proxy, and scores position trace only.
+  - Channel gains are one seeded synthetic realization.
+  - Failed numerical subproblems retain their feasible starts and cannot cause
+    a convergence claim.
+  - The returned best feasible point is a local heuristic result, not a global
+    optimum or a reproduction of a published numerical result.
+parameters:
+  seed: 20260717
+  transmit_antennas: 32
+  receive_antennas: 32
+  sensing_targets: 3
+  communication_users: 3
+  joint_users: 1
+  power_budget_watt: 40.0
+  bandwidth_budget_hz: 1.0e8
+  false_alarm_probability: 0.01
+  rate_floor_bit_per_second: 1.0e6
+  localization_range_reference_m: 1.0
+  localization_angle_reference_rad: 1.0e-3
+  localization_angle_noise_bandwidth_hz: 1.0e7
+  array_element_spacing_wavelength: 0.5
+oracle:
+  type: analytic-boundary-independent-covariance-and-feasibility-postconditions
+  expected:
+    zero_snr_detection_probability: 0.01
+    extreme_false_alarm_probability: 1.0e-100
+    detection_probability_closed_form: Pfa^(1/(1+SNR))
+    joint_user_channel_vector_length: L
+    unrepresentable_final_outputs_raise_explicit_domain_errors: true
+    representable_subnormal_final_rate_is_preserved: true
+    subnormal_snr_double_rounding_is_ulp_accurate: true
+    zero_power_range_crb: positive-infinity
+    angle_information_allocation_bandwidth_invariant: true
+    localization_score_dimensionless: true
+    tracking_update_epoch: predicted-state
+    tracking_scalar_metric: position-covariance-trace
+    phase_one_counterexample_feasible: true
+    best_feasible_objective_history_non_decreasing: true
+    all_user_rates_meet_floor: true
+    resource_budgets_close: true
+tolerances:
+  zero_snr_probability_absolute: 1.0e-14
+  analytic_detection_probability_absolute: 1.0e-15
+  localization_score_absolute: 1.0e-14
+  predicted_state_pcrb_absolute: 2.0e-13
+  power_budget_absolute_watt: 1.0e-9
+  bandwidth_budget_absolute_hz: 1.0e-5
+evidence:
+  command: >-
+    python scripts/verify_simulation_baseline.py
+    isac_resource_allocation --json
+  certificate_checks:
+    - allocations_are_finite
+    - angle_proxy_is_allocation_bandwidth_independent
+    - bandwidth_budget
+    - best_feasible_objective_history_is_monotonic
+    - extreme_finite_inputs_fail_with_explicit_domain_errors
+    - joint_user_count_controls_channel_dimensions
+    - localization_score_is_dimensionless_by_construction
+    - nonzero_scaled_chi_square_oracle
+    - per_user_rate_threshold
+    - phase_one_counterexample_is_feasible
+    - power_budget
+    - predicted_state_pcrb_matches_covariance_oracle
+    - representable_subnormal_final_rate_is_preserved
+    - subnormal_snr_double_rounding_is_ulp_accurate
+    - ultra_low_snr_rate_is_ulp_accurate
+    - unit_snr_rate_is_ulp_accurate
+    - zero_power_has_infinite_range_crb
+    - zero_snr_equals_false_alarm
+  checks:
+    - scaled-central-chi-square zero-SNR boundary and extreme-Pfa oracle
+    - joint-user count and channel-vector dimension consistency for L=0 and L=2
+    - explicit overflow and underflow rejection without RuntimeWarning leakage
+    - subnormal final bit-rate after analytic low-SNR bandwidth cancellation
+    - subnormal-SNR rate within one ULP of a 500-digit Decimal oracle
+    - ultra-low-SNR final rate within eight ULP of a high-precision oracle
+    - unit-SNR rates within eight ULP despite 600-decade input scaling
+    - infinite range CRB at zero information
+    - exact angle-proxy invariance to allocated bandwidth
+    - explicitly normalized dimensionless localization score
+    - independent Joseph-form predicted-state covariance oracle
+    - feasible nonuniform Phase-I counterexample
+    - monotonic best-feasible objective history
+    - direct per-user communication-rate postcondition
+    - direct power and bandwidth postconditions
+    - finite returned allocations
+limitations:
+  - The detector is a declared scaled-central-chi-square teaching model, not a
+    claim about every radar detector or target likelihood.
+  - Localization uses declared information-bound proxies and reference scales;
+    it is not a Fisher-information derivation from raw measurements.
+  - Tracking is one local covariance-bound recursion, not a complete estimator
+    or the reference paper's temporal optimizer.
+  - The alternating heuristic certifies local feasibility and monotonic
+    retention only; it does not certify stationarity or global optimality.
+  - No author data, published figure, or numerical table is reproduced.
