@@ -75,6 +75,59 @@ def test_paper_entries_use_canonical_scholarly_sources():
     assert not failures, "Non-canonical scholarly rows:\n" + "\n".join(failures)
 
 
+def test_readme_preserves_the_original_featured_paper_structure():
+    """Keep the rich six-section homepage while allowing evidence-based corrections."""
+    expected_rows = {
+        "🔥 Landmark Surveys": 7,
+        "📡 RF ISAC — Antenna & Waveform": 9,
+        "🔦 Optical ISAC": 6,
+        "🌐 Network Architecture": 8,
+        "🧠 AI/ML for ISAC": 8,
+        "🔒 Security": 6,
+    }
+    observed_rows = defaultdict(int)
+    current_section = None
+    in_featured = False
+    failures = []
+
+    for line_number, line in enumerate(
+        (ROOT / "README.md").read_text(encoding="utf-8").splitlines(), 1
+    ):
+        if line == "## ⭐ Featured Papers":
+            in_featured = True
+            continue
+        if in_featured and line.startswith("## "):
+            break
+        if not in_featured:
+            continue
+        if line.startswith("### "):
+            current_section = line.removeprefix("### ")
+            continue
+        if not line.startswith("| ["):
+            continue
+        if current_section not in expected_rows:
+            failures.append(
+                f"README.md:{line_number}: featured row outside an expected section"
+            )
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        match = re.fullmatch(r"\[([^]]+)]\(([^)]+)\)", cells[0])
+        if match is None:
+            failures.append(f"README.md:{line_number}: malformed publication link")
+            continue
+        title, target = match.groups()
+        identifier = _canonical_identifier(target)
+        if identifier is None:
+            failures.append(f"README.md:{line_number}: non-canonical source {target}")
+        if PLACEHOLDER_TITLE.search(title):
+            failures.append(f"README.md:{line_number}: placeholder title {title!r}")
+        observed_rows[current_section] += 1
+
+    assert dict(observed_rows) == expected_rows
+    assert sum(observed_rows.values()) == 44
+    assert not failures, "Invalid featured-paper rows:\n" + "\n".join(failures)
+
+
 def test_identifier_title_and_metadata_are_one_to_one():
     by_identifier = defaultdict(set)
     by_title = defaultdict(set)
@@ -230,13 +283,14 @@ def test_live_link_exceptions_are_exact_and_match_workflow():
         "http://www.w3.org/2005/Atom",
         "https://www.mathworks.com/products/radar.html",
         "https://doi.org/10.1002/0471663085",
+        "https://doi.org/10.1145/3638550.3641130",
     }
     entries = registry["exceptions"]
     assert registry["schema_version"] == 1
     assert str(registry["verified_on"]) == "2026-07-18"
     assert {entry["url"] for entry in entries} == expected_urls
     patterns = [entry["lychee_pattern"] for entry in entries]
-    assert len(patterns) == len(set(patterns)) == 4
+    assert len(patterns) == len(set(patterns)) == 5
     assert all(pattern.startswith("^") and pattern.endswith("$") for pattern in patterns)
 
     workflow = (ROOT / ".github/workflows/link-check.yml").read_text(

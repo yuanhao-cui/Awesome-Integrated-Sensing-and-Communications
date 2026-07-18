@@ -93,6 +93,7 @@ jobs:
             --exclude '^http://www\.w3\.org/2005/Atom$'
             --exclude '^https://www\.mathworks\.com/products/radar\.html$'
             --exclude '^https://doi\.org/10\.1002/0471663085$'
+            --exclude '^https://doi\.org/10\.1145/3638550\.3641130$'
             './**/*.md'
             './**/*.cff'
             './**/*.yml'
