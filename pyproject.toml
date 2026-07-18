@@ -1,0 +1,48 @@
+[project]
+name = "awesome-integrated-sensing-and-communications-audit"
+version = "0.0.0"
+description = "Reproducible audit and simulation verification environment"
+requires-python = ">=3.10,<3.13"
+dependencies = []
+
+[dependency-groups]
+integrity = [
+  "pytest==8.3.5",
+  "PyYAML==6.0.2",
+  "yamllint==1.35.1",
+  "jsonschema==4.25.1",
+]
+ci = [
+  { include-group = "integrity" },
+  "pytest-cov==6.0.0",
+  "numpy==1.26.4",
+  "scipy==1.13.1",
+  "matplotlib==3.10.9",
+  "cvxpy==1.6.5",
+  "scikit-learn==1.5.2",
+  "torch==2.5.1",
+  "ruff==0.9.10",
+]
+cff-validation = [
+  "cffconvert==2.0.0",
+]
+
+[tool.uv]
+package = false
+default-groups = []
+fork-strategy = "fewest"
+build-constraint-dependencies = ["setuptools==83.0.0"]
+required-environments = [
+  "platform_machine == 'x86_64' and sys_platform == 'linux'",
+  "platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
+conflicts = [
+  [
+    { group = "cff-validation" },
+    { group = "integrity" },
+  ],
+  [
+    { group = "cff-validation" },
+    { group = "ci" },
+  ],
+]

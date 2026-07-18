@@ -1,0 +1,95 @@
+---
+schema_version: 1
+baseline: isac_energy_efficient_beamforming
+reference:
+  doi: 10.1109/TCOMM.2024.3369696
+evidence_level: equation-level
+paper_figure_parity: false
+model: >-
+  Single-user fixed-direction scalar-power slice with communication energy
+  efficiency and an identifiable point-target Fisher-information CRB.
+assumptions:
+  - Public sources do not disclose the paper channel realization or noise powers.
+  - The certificate uses one seeded local complex-Gaussian channel.
+  - Rate uses log1p for every representable finite nonnegative SINR.
+  - Interference power is summed only over streams j != k; desired power is
+    never subtracted from a received-power total.
+  - Projection powers and radiated power use normalized binary scaling.
+  - >-
+    Complex channel projections use exact signed binary accumulation before
+    conversion to a floating-point power, independently of antenna order.
+  - CRB identifiability is tested after relative response normalization.
+parameters:
+  seed: 20260717
+  transmit_antennas: 4
+  communication_users: 1
+  sensing_receive_antennas: 5
+  snapshots: 30
+  max_power_dbm: 30.0
+  amplifier_inefficiency: 0.35
+  common_beam_scale_regression: 1.0e-8
+  low_sinr_regression: 1.0e-20
+  weak_interference_projection: 1.0e-10
+  weak_interference_noise_power: 1.0e-30
+  total_power_amplitude_scale: 1.0e150
+  cancellation_large_projection: 1.0e280
+  cancellation_residual_projection: 1.0e-60
+  quadratic_transform_channel_amplitude: 1.0e154
+oracle:
+  type: dense-grid-explicit-fim-and-analytic-boundary
+  expected:
+    Dinkelbach_matches_500001_point_grid: true
+    covariance_crb_matches_snapshot_fim: true
+    crb_scales_inverse_square_with_beam: true
+    sub_epsilon_sinr_rate_is_positive: true
+    weak_interference_is_not_cancelled: true
+    total_power_scales_with_squared_amplitude: true
+    cancellation_tail_survives_340_decades: true
+    cancellation_tail_is_permutation_invariant: true
+    optimized_quadratic_transform_is_scale_safe: true
+tolerances:
+  power_grid_steps: 1.1
+  crb_relative: 5.0e-12
+  steering_derivative_relative: 1.0e-8
+  crb_scale_relative: 5.0e-12
+  sub_epsilon_snr_rate_relative: 5.0e-16
+  weak_interference_relative: 3.0e-15
+  total_power_scale_relative: 2.0e-15
+  cancellation_tail_relative: 3.0e-15
+evidence:
+  command: >-
+    python -m
+    code.baselines.isac_energy_efficient_beamforming.examples.verify_reference_slice
+    --json
+  certificate_checks:
+    - cancellation_tail_across_340_decades
+    - cancellation_tail_permutation_invariant
+    - crb_matches_explicit_fim
+    - crb_scale_invariance_at_1e_minus_8
+    - dinkelbach_converged
+    - dinkelbach_matches_grid
+    - power_constraint
+    - quadratic_optimum_reduction_is_scale_safe
+    - steering_derivative_matches_finite_difference
+    - sub_epsilon_snr_rate_preserved
+    - total_power_scale_oracle
+    - weak_interference_not_cancelled
+    - weak_interference_sum_rate
+  checks:
+    - dense scalar-power grid with 500001 points
+    - explicit snapshot-domain Fisher information matrix
+    - central finite-difference steering derivative
+    - inverse-square CRB scaling at a 1.0e-8 common beam scale
+    - log1p rate oracle at SINR 1.0e-20
+    - desired-subtraction counterexample with 1.0e-10 interference
+    - total-power squared-scale oracle at amplitude scale 1.0e150
+    - >-
+      all six antenna permutations of 1.0e280 - 1.0e280 + 1.0e-60
+    - reduced Eq. (14)-(15) optimum at representable SINR 1.0e308
+limitations:
+  - A published figure or multi-user Algorithm 1 is not reproduced.
+  - A finite CRB outside binary64 raises a numeric range exception.
+  - >-
+    Positive SINR, rate, or total power outside binary64 raises an explicit
+    numeric range exception; exact zero remains zero.
+  - Local synthetic assumptions are emitted in the JSON certificate.

@@ -1,414 +1,267 @@
+"""Exact Dinkelbach reference for a declared single-user model slice.
+
+This is not an implementation of the paper's multi-user Algorithm 1.  It
+solves the scientifically auditable restriction in which the beam direction is
+fixed and only scalar radiated power is optimized.  For one user, every inner
+Dinkelbach problem is concave and has the closed-form optimizer implemented
+below.  A dense-grid oracle is provided as an independent numerical check.
 """
-Dinkelbach Solver for Fractional Programming
-=============================================
 
-Implements Dinkelbach's method for communication EE maximization (Algorithm 1).
+from __future__ import annotations
 
-The communication EE is a fractional program:
-    max EE_C = f₁(W) / f₂(W)
-    where f₁(W) = Σ_k log₂(1+SINR_k) (sum rate)
-          f₂(W) = (1/ε)Σ_k||w_k||² + P₀ (power consumption)
-
-Dinkelbach's method converts this to a parametric subtractive form:
-    max f₁(W) - λ f₂(W)
-    with λ updated as λ_{n+1} = f₁(W_n) / f₂(W_n)
-
-The full Algorithm 1 (Section III) combines:
-1. Dinkelbach method for fractional programming
-2. Quadratic transform for log-SINR
-3. SDR for non-convex beamforming
-4. SCA for rank-1 recovery
-
-Reference: Zou et al., IEEE Trans. Commun., 2024 (Algorithm 1)
-"""
+from dataclasses import dataclass
 
 import numpy as np
-from typing import Optional, Tuple, List, NamedTuple
-import cvxpy as cp
+
+from .ee_metrics import compute_crb, compute_ee_c, compute_sum_rate
+from .system_model import ISACSystemModel
 
 
-class DinkelbachResult(NamedTuple):
-    """Result from Dinkelbach solver."""
-    W: np.ndarray           # Optimal beamforming matrix (M x K)
-    ee_c: float             # Communication EE (bits/Hz/J)
-    sum_rate: float         # Sum rate (bits/Hz)
-    total_power: float      # Total transmit power
-    n_iterations: int       # Number of Dinkelbach iterations
-    converged: bool         # Whether converged
-    obj_history: List[float]  # EE_C at each iteration
+class InfeasibleReferenceProblem(ValueError):
+    """Raised when explicit SINR/CRB requirements exceed the power budget."""
 
 
-class DinkelbachSolver:
-    """
-    Dinkelbach solver for communication EE maximization (Algorithm 1).
+@dataclass(frozen=True)
+class DinkelbachIteration:
+    iteration: int
+    lambda_before: float
+    power_watt: float
+    subtractive_residual: float
+    energy_efficiency: float
 
-    Combines:
-    - Dinkelbach method (fractional → subtractive)
-    - Quadratic transform (log-SINR handling)
-    - SDR (beamforming relaxation)
-    - SCA (rank-1 recovery)
-    """
+
+@dataclass(frozen=True)
+class DinkelbachResult:
+    W: np.ndarray
+    power_watt: float
+    ee_c: float
+    sum_rate: float
+    sinr: float
+    crb: float
+    n_iterations: int
+    converged: bool
+    residual: float
+    history: tuple[DinkelbachIteration, ...]
+
+    @property
+    def total_power(self) -> float:
+        """Backward-readable alias for radiated power."""
+
+        return self.power_watt
+
+    @property
+    def obj_history(self) -> list[float]:
+        """Return EE values without pretending they are paper-figure data."""
+
+        return [item.energy_efficiency for item in self.history]
+
+
+def _unit_direction(model: ISACSystemModel, direction: np.ndarray | None) -> np.ndarray:
+    if model.K != 1:
+        raise ValueError("the validated reference slice requires K=1")
+    if direction is None:
+        direction = model.get_channel(0)
+    direction = np.asarray(direction, dtype=complex)
+    if direction.shape != (model.M,) or not np.all(np.isfinite(direction)):
+        raise ValueError(f"direction must be a finite vector of shape {(model.M,)}")
+    norm = float(np.linalg.norm(direction))
+    if norm <= np.finfo(float).tiny:
+        raise ValueError("direction must be non-zero")
+    return direction / norm
+
+
+def _beam(direction: np.ndarray, power_watt: float) -> np.ndarray:
+    return np.sqrt(max(float(power_watt), 0.0)) * direction[:, None]
+
+
+class SingleUserPowerDinkelbach:
+    """Optimize (4) over scalar power for a fixed unit beam direction."""
 
     def __init__(
         self,
-        model: "ISACSystemModel",
-        max_dinkelbach_iter: int = 30,
-        max_inner_iter: int = 20,
-        tol_outer: float = 1e-4,
-        tol_inner: float = 1e-5,
-        solver: str = "MOSEK",
-        verbose: bool = False,
-    ):
-        """
-        Initialize Dinkelbach solver.
-
-        Parameters
-        ----------
-        model : ISACSystemModel
-            System model with channels, parameters
-        max_dinkelbach_iter : int
-            Maximum Dinkelbach iterations (default: 30)
-        max_inner_iter : int
-            Maximum inner iterations for SCA (default: 20)
-        tol_outer : float
-            Outer loop convergence tolerance
-        tol_inner : float
-            Inner loop convergence tolerance
-        solver : str
-            CVXPY solver name
-        verbose : bool
-            Print iteration details
-        """
+        model: ISACSystemModel,
+        direction: np.ndarray | None = None,
+        max_iterations: int = 100,
+        tolerance: float = 1e-10,
+    ) -> None:
+        if not isinstance(max_iterations, int) or max_iterations <= 0:
+            raise ValueError("max_iterations must be a positive integer")
+        if not np.isfinite(tolerance) or tolerance <= 0.0:
+            raise ValueError("tolerance must be finite and positive")
         self.model = model
-        self.M = model.M
-        self.K = model.K
-        self.max_dinkelbach_iter = max_dinkelbach_iter
-        self.max_inner_iter = max_inner_iter
-        self.tol_outer = tol_outer
-        self.tol_inner = tol_inner
-        self.solver = solver
-        self.verbose = verbose
+        self.direction = _unit_direction(model, direction)
+        self.max_iterations = max_iterations
+        self.tolerance = float(tolerance)
+
+    def _sensing_vectors(
+        self, target_angle_deg: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        theta = np.deg2rad(float(target_angle_deg))
+        if not np.isfinite(theta):
+            raise ValueError("target_angle_deg must be finite")
+        return (
+            self.model.steering_vector_tx(theta),
+            self.model.steering_vector_rx(theta),
+            self.model.steering_derivative_tx(theta),
+            self.model.steering_derivative_rx(theta),
+        )
+
+    def feasible_power_interval(
+        self,
+        target_angle_deg: float = 90.0,
+        crb_max: float | None = None,
+        gamma_min: float | None = None,
+        alpha_abs: float = 1.0,
+    ) -> tuple[float, float]:
+        """Return the exact scalar feasible interval ``[p_min, P_max]``."""
+
+        gain = float(np.abs(self.model.get_channel(0).conj() @ self.direction) ** 2)
+        if gain <= np.finfo(float).tiny:
+            raise InfeasibleReferenceProblem("the fixed direction has zero channel gain")
+        p_min = 0.0
+        if gamma_min is not None:
+            gamma_min = float(gamma_min)
+            if not np.isfinite(gamma_min) or gamma_min < 0.0:
+                raise ValueError("gamma_min must be finite and non-negative")
+            p_min = max(p_min, gamma_min * self.model.sigma_c2 / gain)
+        if crb_max is not None:
+            crb_max = float(crb_max)
+            if not np.isfinite(crb_max) or crb_max <= 0.0:
+                raise ValueError("crb_max must be finite and positive")
+            a_t, a_r, da_t, da_r = self._sensing_vectors(target_angle_deg)
+            unit_crb = compute_crb(
+                _beam(self.direction, 1.0),
+                a_t,
+                a_r,
+                da_t,
+                da_r,
+                self.model.sigma_s2,
+                self.model.L,
+                alpha_abs,
+            )
+            if not np.isfinite(unit_crb):
+                raise InfeasibleReferenceProblem(
+                    "the fixed direction contains no identifiable angle information"
+                )
+            p_min = max(p_min, unit_crb / crb_max)
+        if p_min > self.model.P_max * (1.0 + 64.0 * np.finfo(float).eps):
+            raise InfeasibleReferenceProblem(
+                f"minimum feasible power {p_min:.12g} W exceeds "
+                f"P_max={self.model.P_max:.12g} W"
+            )
+        return min(p_min, self.model.P_max), self.model.P_max
+
+    def _inner_power(self, lambda_value: float, p_min: float, p_max: float) -> float:
+        gain = float(np.abs(self.model.get_channel(0).conj() @ self.direction) ** 2)
+        noise_over_gain = self.model.sigma_c2 / gain
+        if lambda_value <= 0.0:
+            return p_max
+        stationary = self.model.epsilon / (lambda_value * np.log(2.0)) - noise_over_gain
+        return float(np.clip(stationary, p_min, p_max))
 
     def solve(
         self,
         target_angle_deg: float = 90.0,
-        crb_max: Optional[float] = None,
-        gamma_min: Optional[float] = None,
-        W_init: Optional[np.ndarray] = None,
+        crb_max: float | None = None,
+        gamma_min: float | None = None,
+        alpha_abs: float = 1.0,
     ) -> DinkelbachResult:
-        """
-        Solve communication EE maximization (Algorithm 1).
+        """Solve the fixed-direction fractional program and postvalidate it."""
 
-        Steps:
-        1. Initialize λ = 0, W
-        2. Repeat:
-           a. Solve: max f₁(W) - λ f₂(W) via SDR + SCA
-           b. Update: λ = f₁(W) / f₂(W)
-           c. Check: |f₁(W) - λ f₂(W)| < ε
-        3. Return optimal W
-
-        Parameters
-        ----------
-        target_angle_deg : float
-            Target angle in degrees (default: 90°)
-        crb_max : float, optional
-            Maximum CRB constraint
-        gamma_min : float, optional
-            Minimum SINR per user
-        W_init : np.ndarray, optional
-            Initial beamforming matrix (M x K)
-
-        Returns
-        -------
-        DinkelbachResult
-            Optimization result
-        """
-        theta_rad = np.radians(target_angle_deg)
-        a_t = self.model.steering_vector_tx(theta_rad)
-        a_r = self.model.steering_vector_rx(theta_rad)
-
-        H = self.model.get_csi()
-        sigma_c2 = self.model.sigma_c2
-        sigma_s2 = self.model.sigma_s2
-        epsilon = self.model.epsilon
-        P0 = self.model.P0
-        P_max = self.model.P_max
-        L = self.model.L
-
-        # Initialize beamforming
-        if W_init is None:
-            W_init = self._initialize_beamforming(H, a_t, P_max)
-
-        W_current = W_init.copy()
-        lambda_param = 0.0
-        obj_history = []
+        p_min, p_max = self.feasible_power_interval(
+            target_angle_deg, crb_max, gamma_min, alpha_abs
+        )
+        lambda_value = 0.0
+        history: list[DinkelbachIteration] = []
         converged = False
+        power = p_max
+        residual = float("inf")
 
-        for dinkelbach_iter in range(self.max_dinkelbach_iter):
-            # Compute current metrics
-            sum_rate = self._compute_sum_rate(H, W_current, sigma_c2)
-            total_power = self._compute_total_power(W_current)
-            total_consumption = (1 / epsilon) * total_power + P0
-            ee_c = sum_rate / total_consumption if total_consumption > 0 else 0
-
-            obj_history.append(ee_c)
-
-            if self.verbose:
-                print(
-                    f"Dinkelbach iter {dinkelbach_iter}: "
-                    f"EE_C = {ee_c:.6f}, λ = {lambda_param:.6f}"
-                )
-
-            # Check convergence
-            subtractive_obj = sum_rate - lambda_param * total_consumption
-            if abs(subtractive_obj) < self.tol_outer * (1 + abs(sum_rate)):
-                converged = True
-                if self.verbose:
-                    print(f"Dinkelbach converged at iteration {dinkelbach_iter}")
-                break
-
-            # Solve inner optimization: max f₁(W) - λ f₂(W)
-            W_next, inner_status = self._solve_inner(
-                H, W_current, a_t, a_r, sigma_c2, sigma_s2,
-                epsilon, P0, P_max, L, lambda_param,
-                crb_max, gamma_min,
+        for iteration in range(1, self.max_iterations + 1):
+            power = self._inner_power(lambda_value, p_min, p_max)
+            W = _beam(self.direction, power)
+            numerator = compute_sum_rate(self.model.H, W, self.model.sigma_c2)
+            denominator = power / self.model.epsilon + self.model.P0
+            residual = numerator - lambda_value * denominator
+            ee = numerator / denominator
+            history.append(
+                DinkelbachIteration(iteration, lambda_value, power, residual, ee)
             )
-
-            if inner_status not in ["optimal", "optimal_inaccurate"]:
-                if self.verbose:
-                    print(f"Inner solver failed: {inner_status}")
+            residual_scale = max(1.0, abs(numerator), abs(lambda_value * denominator))
+            if abs(residual) <= self.tolerance * residual_scale:
+                converged = True
                 break
+            lambda_value = ee
 
-            W_current = W_next
-
-            # Update λ
-            sum_rate_new = self._compute_sum_rate(H, W_current, sigma_c2)
-            total_power_new = self._compute_total_power(W_current)
-            total_consumption_new = (1 / epsilon) * total_power_new + P0
-
-            if total_consumption_new > 1e-15:
-                lambda_param = sum_rate_new / total_consumption_new
-            else:
-                lambda_param = 0.0
-
-        # Final metrics
-        final_sum_rate = self._compute_sum_rate(H, W_current, sigma_c2)
-        final_total_power = self._compute_total_power(W_current)
-        final_consumption = (1 / epsilon) * final_total_power + P0
-        final_ee_c = final_sum_rate / final_consumption if final_consumption > 0 else 0
+        W = _beam(self.direction, power)
+        sinr = self.model.compute_sinr(0, W)
+        a_t, a_r, da_t, da_r = self._sensing_vectors(target_angle_deg)
+        crb = compute_crb(
+            W,
+            a_t,
+            a_r,
+            da_t,
+            da_r,
+            self.model.sigma_s2,
+            self.model.L,
+            alpha_abs,
+        )
+        power_tolerance = 128.0 * np.finfo(float).eps * max(1.0, p_max)
+        if not converged:
+            raise RuntimeError("Dinkelbach iteration did not meet its residual tolerance")
+        if power < p_min - power_tolerance or power > p_max + power_tolerance:
+            raise RuntimeError("returned power violates the certified feasible interval")
+        if gamma_min is not None and sinr + 1e-10 < float(gamma_min):
+            raise RuntimeError("returned beam violates gamma_min")
+        if crb_max is not None and crb > float(crb_max) * (1.0 + 1e-10):
+            raise RuntimeError("returned beam violates crb_max")
 
         return DinkelbachResult(
-            W=W_current,
-            ee_c=final_ee_c,
-            sum_rate=final_sum_rate,
-            total_power=final_total_power,
-            n_iterations=dinkelbach_iter + 1,
+            W=W,
+            power_watt=power,
+            ee_c=compute_ee_c(
+                self.model.H,
+                W,
+                self.model.sigma_c2,
+                self.model.epsilon,
+                self.model.P0,
+            ),
+            sum_rate=compute_sum_rate(self.model.H, W, self.model.sigma_c2),
+            sinr=sinr,
+            crb=crb,
+            n_iterations=len(history),
             converged=converged,
-            obj_history=obj_history,
+            residual=residual,
+            history=tuple(history),
         )
 
-    def _initialize_beamforming(
+    def dense_grid_oracle(
         self,
-        H: np.ndarray,
-        a_t: np.ndarray,
-        P_max: float,
-    ) -> np.ndarray:
-        """
-        Initialize beamforming matrix.
+        target_angle_deg: float = 90.0,
+        crb_max: float | None = None,
+        gamma_min: float | None = None,
+        alpha_abs: float = 1.0,
+        n_points: int = 200_001,
+    ) -> tuple[float, float, float]:
+        """Return ``(power, EE, grid_spacing)`` from an independent grid search."""
 
-        Uses matched filter initialization: w_k ∝ h_k for communication,
-        with a fraction of power allocated to sensing direction.
+        if not isinstance(n_points, int) or n_points < 2:
+            raise ValueError("n_points must be an integer of at least two")
+        p_min, p_max = self.feasible_power_interval(
+            target_angle_deg, crb_max, gamma_min, alpha_abs
+        )
+        powers = np.linspace(p_min, p_max, n_points)
+        gain = float(np.abs(self.model.get_channel(0).conj() @ self.direction) ** 2)
+        rates = np.log1p(gain * powers / self.model.sigma_c2) / np.log(2.0)
+        efficiencies = rates / (powers / self.model.epsilon + self.model.P0)
+        index = int(np.argmax(efficiencies))
+        spacing = float((p_max - p_min) / (n_points - 1))
+        return float(powers[index]), float(efficiencies[index]), spacing
 
-        Parameters
-        ----------
-        H : np.ndarray
-            Channel matrix (K x M)
-        a_t : np.ndarray
-            Transmit steering vector (M,)
-        P_max : float
-            Maximum power
 
-        Returns
-        -------
-        np.ndarray
-            Initial beamforming matrix (M x K)
-        """
-        M, K = self.M, self.K
-        W = np.zeros((M, K), dtype=complex)
-
-        # Allocate power: 50% communication, 50% sensing
-        p_comm = 0.5 * P_max / K
-        p_sense = 0.5 * P_max / K
-
-        for k in range(K):
-            h_k = H[k, :]
-            # Communication component (matched filter)
-            w_comm = h_k / (np.linalg.norm(h_k) + 1e-15) * np.sqrt(p_comm)
-            # Sensing component (beam toward target)
-            w_sense = a_t / (np.linalg.norm(a_t) + 1e-15) * np.sqrt(p_sense / K)
-            W[:, k] = w_comm + w_sense
-
-        return W
-
-    def _solve_inner(
-        self,
-        H: np.ndarray,
-        W_lin: np.ndarray,
-        a_t: np.ndarray,
-        a_r: np.ndarray,
-        sigma_c2: float,
-        sigma_s2: float,
-        epsilon: float,
-        P0: float,
-        P_max: float,
-        L: int,
-        lambda_param: float,
-        crb_max: Optional[float],
-        gamma_min: Optional[float],
-    ) -> Tuple[np.ndarray, str]:
-        """
-        Solve inner optimization: max f₁(W) - λ f₂(W).
-
-        Uses SDR + quadratic transform + SCA.
-
-        Parameters
-        ----------
-        (Various system parameters)
-        lambda_param : float
-            Dinkelbach parameter λ
-
-        Returns
-        -------
-        W_opt : np.ndarray
-            Optimized beamforming matrix
-        status : str
-            Solver status
-        """
-        K, M = H.shape
-
-        # PSD matrix variables for SDR
-        W_psd = [cp.Variable((M, M), hermitian=True) for _ in range(K)]
-
-        constraints = []
-
-        # PSD constraints
-        for k in range(K):
-            constraints.append(W_psd[k] >> 0)
-
-        # Power constraint
-        total_power_expr = sum(cp.real(cp.trace(W_psd[k])) for k in range(K))
-        constraints.append(total_power_expr <= P_max)
-
-        # SINR constraints (if specified)
-        if gamma_min is not None:
-            for k in range(K):
-                h_k = H[k, :]
-                signal = cp.real(cp.quad_form(h_k, W_psd[k]))
-                interference = sum(
-                    cp.real(cp.quad_form(h_k, W_psd[j]))
-                    for j in range(K)
-                    if j != k
-                )
-                constraints.append(signal >= gamma_min * (sigma_c2 + interference))
-
-        # CRB constraint (if specified)
-        if crb_max is not None:
-            Rx = sum(W_psd)
-            threshold = sigma_s2 * np.sum(np.abs(a_r) ** 2) / (2 * L * crb_max)
-
-            # Linearized CRB constraint using SCA
-            Rx_lin = W_lin @ W_lin.conj().T
-            theta = np.pi / 2
-            m_indices = np.arange(M)
-            da_t = 1j * 2 * np.pi * 0.5 * m_indices * np.cos(theta) * a_t
-
-            # First-order approximation
-            fim_lin = np.real(da_t.conj() @ Rx_lin @ da_t)
-            if fim_lin > 1e-15:
-                grad_Rx = np.outer(da_t, da_t.conj())
-                fim_approx = fim_lin + cp.real(
-                    cp.trace(grad_Rx @ (Rx - Rx_lin))
-                )
-                constraints.append(fim_approx >= threshold)
-
-        # Quadratic transform objective for sum rate
-        # Use linearized approximation around W_lin
-        sum_rate_approx = 0
-        for k in range(K):
-            h_k = H[k, :]
-            hw_k_lin = h_k.conj() @ W_lin[:, k]
-            total_power_k_lin = sigma_c2 + sum(
-                np.abs(h_k.conj() @ W_lin[:, j]) ** 2 for j in range(K)
-            )
-
-            # Optimal t_k
-            if total_power_k_lin > 1e-15:
-                t_k = hw_k_lin / total_power_k_lin
-            else:
-                t_k = 0.0
-
-            # Quadratic transform terms
-            signal_term = 2 * cp.real(
-                np.conj(t_k) * cp.quad_form(h_k, W_psd[k])
-            )
-
-            # Approximation of |t_k|² term (first-order)
-            t_k_sq = np.abs(t_k) ** 2
-            power_terms = sum(
-                cp.real(cp.quad_form(h_k, W_psd[j])) for j in range(K)
-            )
-            power_term = t_k_sq * (sigma_c2 + power_terms)
-
-            sum_rate_approx += signal_term - power_term
-
-        # Power consumption term: (1/ε)tr(Σ_k W_k) + P₀
-        power_consumption = (1 / epsilon) * total_power_expr + P0
-
-        # Dinkelbach objective: f₁ - λ f₂
-        objective = cp.Maximize(sum_rate_approx - lambda_param * power_consumption)
-
-        prob = cp.Problem(objective, constraints)
-
-        try:
-            prob.solve(solver=cp.MOSEK, verbose=False)
-            status = prob.status
-        except (cp.error.SolverError, Exception):
-            try:
-                prob.solve(solver=cp.SCS, verbose=False, max_iters=10000)
-                status = prob.status
-            except Exception:
-                return W_lin, "failed"
-
-        if prob.status in ["optimal", "optimal_inaccurate"]:
-            # Rank-1 recovery via eigenvalue decomposition
-            W_opt = np.zeros((M, K), dtype=complex)
-            for k in range(K):
-                W_k = W_psd[k].value
-                if W_k is not None:
-                    eigenvalues, eigenvectors = np.linalg.eigh(W_k)
-                    idx = np.argmax(eigenvalues)
-                    w_k = eigenvectors[:, idx] * np.sqrt(max(eigenvalues[idx], 0))
-                    W_opt[:, k] = w_k
-            return W_opt, status
-        else:
-            return W_lin, status
-
-    def _compute_sum_rate(
-        self, H: np.ndarray, W: np.ndarray, sigma_c2: float
-    ) -> float:
-        """Compute sum rate Σ_k log₂(1 + SINR_k)."""
-        K = H.shape[0]
-        sum_rate = 0.0
-        for k in range(K):
-            h_k = H[k, :]
-            signal = np.abs(h_k.conj() @ W[:, k]) ** 2
-            interference = sum(
-                np.abs(h_k.conj() @ W[:, j]) ** 2 for j in range(K) if j != k
-            )
-            sinr_k = signal / (sigma_c2 + interference)
-            sum_rate += np.log2(1 + sinr_k)
-        return sum_rate
-
-    def _compute_total_power(self, W: np.ndarray) -> float:
-        """Compute total transmit power."""
-        return float(np.sum(np.abs(W) ** 2))
+__all__ = [
+    "DinkelbachIteration",
+    "DinkelbachResult",
+    "InfeasibleReferenceProblem",
+    "SingleUserPowerDinkelbach",
+]

@@ -1,27 +1,26 @@
+"""Circle-phase rotation estimator for CSI-ratio trajectories.
+
+This is a paper-inspired educational adapter: it fits the algebraic circle,
+centres the samples, unwraps their observed angle, and fits a weighted line.
+A general Mobius map traverses its circle non-uniformly, so the fitted slope is
+an observation-window rotation proxy rather than an exact paper-algorithm
+reproduction.
+
+The observed rotation sign cannot universally be mapped to physical
+approaching/receding direction: that mapping also depends on the complex
+exponential convention and on static/dynamic path dominance.
 """
-Algorithm 1: Mobius Transformation-based Doppler Estimation.
 
-This is the PRIMARY algorithm that can estimate the **signed** Doppler frequency.
-
-Steps (from the paper):
-1. Compute CSI-ratio R(t_k) = H_m(t_k) / H_{m+1}(t_k)
-2. Fit circle to R(t_k) in complex plane via least-squares (Eq. 11)
-3. Shift circle to origin: R_s(t_k) = R(t_k) - C_0
-4. Calculate angle θ_R(t_k) = arg(R_s(t_k)) and magnitude a_R(t_k) = |R_s(t_k)|
-5. Weighted linear regression: θ_R(t_k) = β_0 + β_1 * t_k (Eq. 14)
-   Weights: w_k = a_R(t_k) (magnitudes)
-6. f_D = β_1 / (2π * T_s)
-
-The sign of f_D is preserved:
-    f_D > 0: target approaching
-    f_D < 0: target receding
-
-Reference: Eq. (11)-(14) of the paper.
-"""
+from typing import Dict, Tuple
 
 import numpy as np
-from typing import Dict, Optional, Tuple
-from circle_fit import least_squares_circle_fit, fit_circle_kasa, fit_circle_pratt
+
+from .circle_fit import (
+    circle_fit_error,
+    fit_circle_iterative_weighted,
+    fit_circle_kasa,
+    least_squares_circle_fit,
+)
 
 
 def mobius_doppler_estimate(
@@ -29,152 +28,118 @@ def mobius_doppler_estimate(
     T_s: float,
     circle_method: str = "least_squares",
     unwrap_phases: bool = True,
-) -> Dict[str, float]:
+    min_angular_coverage_rad: float = np.pi,
+    min_r_squared: float = 0.95,
+) -> Dict[str, object]:
+    """Estimate the signed angular-rotation rate of a ratio trajectory.
+
+    ``f_D`` is retained as a compatibility key.  It is the signed observed
+    circle-rotation proxy in hertz, not a universal physical direction label.
+    ``direction`` is therefore always ``"unknown"`` and ``rotation_sign``
+    reports only the sign of the fitted trajectory rotation.
     """
-    Estimate Doppler frequency using Mobius transformation (Algorithm 1).
+    samples = np.asarray(R, dtype=complex)
+    if samples.ndim != 1 or samples.size < 4 or not np.all(np.isfinite(samples)):
+        raise ValueError("R must be a finite one-dimensional array with at least 4 samples")
+    if not np.isfinite(T_s) or T_s <= 0:
+        raise ValueError("T_s must be positive and finite")
+    if not isinstance(unwrap_phases, (bool, np.bool_)):
+        raise TypeError("unwrap_phases must be boolean")
+    if not np.isfinite(min_angular_coverage_rad) or min_angular_coverage_rad <= 0:
+        raise ValueError("min_angular_coverage_rad must be positive and finite")
+    if not np.isfinite(min_r_squared) or not 0 <= min_r_squared <= 1:
+        raise ValueError("min_r_squared must lie in [0, 1]")
 
-    This is the ONLY method that can recover the sign of the Doppler frequency.
+    fitters = {
+        "least_squares": least_squares_circle_fit,
+        "kasa": fit_circle_kasa,
+        "iterative_weighted": fit_circle_iterative_weighted,
+    }
+    if circle_method not in fitters:
+        choices = ", ".join(sorted(fitters))
+        raise ValueError(f"unknown circle_method {circle_method!r}; choose one of: {choices}")
+    A, B, radius = fitters[circle_method](samples)
 
-    Parameters
-    ----------
-    R : np.ndarray
-        Complex CSI-ratio samples, shape (N,).
-    T_s : float
-        Sampling interval (seconds). For 2 kHz, T_s = 0.0005 s.
-    circle_method : str
-        Circle fitting method: 'least_squares', 'kasa', or 'pratt'.
-        Default: 'least_squares' (Eq. 11).
-    unwrap_phases : bool
-        Whether to unwrap phase discontinuities before regression.
-        Default: True.
-
-    Returns
-    -------
-    result : dict
-        'f_D': Estimated Doppler frequency (Hz), with sign.
-        'f_D_magnitude': |f_D| (Hz).
-        'direction': 'approaching' if f_D > 0, 'receding' if f_D < 0.
-        'center_A': Real part of circle center.
-        'center_B': Imaginary part of circle center.
-        'radius': Circle radius.
-        'beta_0': Intercept from weighted linear regression.
-        'beta_1': Slope from weighted linear regression.
-        'r_squared': R-squared of the linear fit.
-        'rms_error': RMS error of circle fit.
-
-    Notes
-    -----
-    Eq. (14): Weighted linear regression minimizes
-        Σ w_k * (θ_R(t_k) - β_0 - β_1 * t_k)^2
-    where w_k = |R_s(t_k)| are the magnitudes (more reliable samples
-    near the circle edge get higher weight).
-
-    The Doppler frequency is recovered as:
-        f_D = β_1 / (2π)
-    Note: the T_s in the paper's formulation is already in the time axis,
-    so we compute f_D = β_1 / (2π) where β_1 is in rad/s.
-    """
-    N = len(R)
-    t = np.arange(N) * T_s
-
-    # Step 2: Circle fitting (Eq. 11)
-    if circle_method == "least_squares":
-        A, B, r = least_squares_circle_fit(R)
-    elif circle_method == "kasa":
-        A, B, r = fit_circle_kasa(R)
-    elif circle_method == "pratt":
-        A, B, r = fit_circle_pratt(R)
-    else:
-        raise ValueError(f"Unknown circle method: {circle_method}")
-
-    # Step 3: Shift circle to origin
-    C_0 = A + 1j * B
-    R_s = R - C_0
-
-    # Step 4: Calculate angle and magnitude
-    theta_R = np.angle(R_s)  # angle in radians, range [-π, π]
-    a_R = np.abs(R_s)  # magnitude
-
-    # Unwrap phases to handle 2π discontinuities
+    centered = (samples - (A + 1j * B)) / radius
+    if radius <= 0 or not np.all(np.isfinite(centered)):
+        raise ValueError("ratio trajectory is stationary or has a degenerate circle")
+    angles = np.angle(centered)
     if unwrap_phases:
-        theta_R = np.unwrap(theta_R)
-
-    # Step 5: Weighted linear regression (Eq. 14)
-    # θ_R(t_k) = β_0 + β_1 * t_k, weights = a_R
-    beta_0, beta_1, r_squared = _weighted_linear_regression(t, theta_R, a_R)
-
-    # Step 6: f_D = β_1 / (2π)
-    f_D = beta_1 / (2 * np.pi)
-
-    # Compute circle fit error
-    distances = np.abs(R - C_0)
-    rms_error = np.sqrt(np.mean((distances - r) ** 2))
+        angles = np.unwrap(angles)
+    times = np.arange(samples.size, dtype=float) * T_s
+    beta_0, beta_1, r_squared = _weighted_linear_regression(
+        times, angles, np.abs(centered)
+    )
+    angular_coverage = float(np.ptp(angles))
+    if angular_coverage < min_angular_coverage_rad or r_squared < min_r_squared:
+        raise ValueError(
+            "circle-phase trajectory is invalid for frequency estimation: "
+            f"angular coverage={angular_coverage:.6g} rad "
+            f"(minimum {min_angular_coverage_rad:.6g}), "
+            f"R^2={r_squared:.6g} (minimum {min_r_squared:.6g})"
+        )
+    rotation_frequency = float(beta_1 / (2.0 * np.pi))
+    sign_tolerance = np.finfo(float).eps / T_s
+    rotation_sign = 0 if abs(rotation_frequency) <= sign_tolerance else int(
+        np.sign(rotation_frequency)
+    )
 
     return {
-        "f_D": f_D,
-        "f_D_magnitude": abs(f_D),
-        "direction": "approaching" if f_D > 0 else "receding",
+        "f_D": rotation_frequency,
+        "rotation_frequency_hz": rotation_frequency,
+        "f_D_magnitude": abs(rotation_frequency),
+        "rotation_sign": rotation_sign,
+        "direction": "unknown",
+        "alias_limit_hz": 0.5 / T_s,
+        "alias_ambiguous": True,
+        "valid": True,
+        "angular_coverage_rad": angular_coverage,
+        "min_angular_coverage_rad": min_angular_coverage_rad,
+        "min_r_squared": min_r_squared,
         "center_A": A,
         "center_B": B,
-        "radius": r,
+        "radius": radius,
         "beta_0": beta_0,
         "beta_1": beta_1,
         "r_squared": r_squared,
-        "rms_error": rms_error,
+        "rms_error": circle_fit_error(samples, A, B, radius),
     }
 
 
 def _weighted_linear_regression(
-    x: np.ndarray, y: np.ndarray, weights: np.ndarray
+    x: np.ndarray,
+    y: np.ndarray,
+    weights: np.ndarray,
 ) -> Tuple[float, float, float]:
-    """
-    Weighted linear regression: y = β_0 + β_1 * x.
+    """Fit ``y = beta_0 + beta_1 x`` with validated non-negative weights."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    if x.ndim != 1 or x.size < 2 or x.shape != y.shape or x.shape != weights.shape:
+        raise ValueError("x, y, and weights must be equal 1-D arrays with at least 2 samples")
+    if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+        raise ValueError("regression inputs must be finite")
+    if not np.all(np.isfinite(weights)) or np.any(weights < 0) or np.sum(weights) <= 0:
+        raise ValueError("weights must be finite, non-negative, and have positive sum")
 
-    Minimizes Σ w_i * (y_i - β_0 - β_1 * x_i)^2
+    normalized = weights / np.sum(weights)
+    x_span = float(np.max(x) - np.min(x))
+    if x_span <= np.finfo(float).tiny:
+        raise ValueError("regression time axis has zero numerical variance")
+    x_scaled = (x - np.min(x)) / x_span
+    x_scaled_mean = float(np.sum(normalized * x_scaled))
+    y_mean = float(np.sum(normalized * y))
+    x_centered = x_scaled - x_scaled_mean
+    y_centered = y - y_mean
+    s_xx = float(np.sum(normalized * x_centered**2))
+    if s_xx <= np.finfo(float).eps:
+        raise ValueError("regression time axis has zero numerical variance")
+    scaled_slope = float(np.sum(normalized * x_centered * y_centered) / s_xx)
+    beta_1 = scaled_slope / x_span
+    beta_0 = float(y_mean - beta_1 * np.sum(normalized * x))
 
-    Parameters
-    ----------
-    x : np.ndarray
-        Independent variable, shape (N,).
-    y : np.ndarray
-        Dependent variable, shape (N,).
-    weights : np.ndarray
-        Weights for each sample, shape (N,).
-
-    Returns
-    -------
-    beta_0 : float
-        Intercept.
-    beta_1 : float
-        Slope.
-    r_squared : float
-        Coefficient of determination.
-    """
-    w = weights / np.sum(weights)  # Normalize weights
-
-    # Weighted means
-    x_mean = np.sum(w * x)
-    y_mean = np.sum(w * y)
-
-    # Weighted covariance and variance
-    S_xy = np.sum(w * (x - x_mean) * (y - y_mean))
-    S_xx = np.sum(w * (x - x_mean) ** 2)
-
-    # Slope and intercept
-    if S_xx < 1e-20:
-        beta_1 = 0.0
-    else:
-        beta_1 = S_xy / S_xx
-    beta_0 = y_mean - beta_1 * x_mean
-
-    # R-squared
-    y_pred = beta_0 + beta_1 * x
-    SS_res = np.sum(w * (y - y_pred) ** 2)
-    SS_tot = np.sum(w * (y - y_mean) ** 2)
-
-    if SS_tot < 1e-20:
-        r_squared = 1.0 if SS_res < 1e-20 else 0.0
-    else:
-        r_squared = 1 - SS_res / SS_tot
-
-    return beta_0, beta_1, r_squared
+    prediction = beta_0 + beta_1 * x
+    ss_res = float(np.sum(normalized * (y - prediction) ** 2))
+    ss_tot = float(np.sum(normalized * y_centered**2))
+    r_squared = 1.0 if ss_tot <= np.finfo(float).eps else 1.0 - ss_res / ss_tot
+    return beta_0, beta_1, float(r_squared)

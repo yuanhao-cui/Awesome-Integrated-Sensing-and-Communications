@@ -1,38 +1,79 @@
-name: 💻 Contribute a Baseline
-description: Propose or submit a new code baseline
+---
+name: Contribute a Baseline
+description: Propose or submit a tested code baseline with an explicit evidence boundary
 labels: ["baseline", "enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Please ensure your baseline meets our quality standards:
-        - ≥80% test coverage
-        - All tests pass
-        - Mathematical background in README
-        - Jupyter notebook demo
+        A baseline must include a README, changed-behavior tests, an executable
+        deterministic example, `reproducibility.yaml`, and an independent
+        machine-readable certificate with declared tolerances. A notebook is
+        optional. The repository enforces aggregate single-process coverage of
+        70%; there is no per-baseline 80% requirement.
   - type: input
     id: method
     attributes:
-      label: Method Name
+      label: Method name
       placeholder: "e.g., OTFS-ISAC"
     validations:
       required: true
   - type: input
     id: paper
     attributes:
-      label: Reference Paper
-      placeholder: "arXiv/IEEE link"
+      label: Primary reference
+      description: Provide the canonical DOI and exact version, or explain why none applies.
+      placeholder: "https://doi.org/..."
     validations:
       required: true
-  - type: textarea
-    id: description
+  - type: dropdown
+    id: evidence_level
     attributes:
-      label: Description
-      placeholder: "What does this baseline implement?"
+      label: Proposed evidence level
+      description: Select the lowest level that fully describes the available evidence.
+      options:
+        - educational-surrogate
+        - research-reference
+        - equation-level
+        - exact-reproduction
     validations:
       required: true
   - type: textarea
-      id: status
-      attributes:
-        label: Current Status
-        placeholder: "How complete is the implementation?"
+    id: scope
+    attributes:
+      label: Implemented scope and omissions
+      description: >-
+        State equations or algorithms implemented, substitutions, synthetic
+        paths, and missing paper components.
+    validations:
+      required: true
+  - type: textarea
+    id: oracle
+    attributes:
+      label: Independent oracle and tolerances
+      description: Identify expected values, their provenance, comparison method, and absolute or relative tolerances.
+    validations:
+      required: true
+  - type: textarea
+    id: execution
+    attributes:
+      label: Deterministic command and environment
+      description: Include seed handling, dependency requirements, and the JSON certificate command.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests and failure accounting
+      description: List nominal, boundary, invalid, infeasible, numeric-range, and solver-failure checks.
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Data, code, and license provenance
+      description: >-
+        Identify original or synthetic data, checksums where applicable,
+        third-party code, and license constraints.
+    validations:
+      required: true

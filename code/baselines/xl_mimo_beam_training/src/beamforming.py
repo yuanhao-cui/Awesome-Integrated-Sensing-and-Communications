@@ -10,8 +10,9 @@ Reference:
     unlike far-field codebooks which only depend on the angle.
 """
 
-import numpy as np
 from typing import Optional, Tuple
+
+import numpy as np
 
 
 class BeamformingCodebook:
@@ -33,9 +34,17 @@ class BeamformingCodebook:
         antenna_spacing: Optional[float] = None,
         wavelength: float = 0.01,
     ):
+        if not isinstance(num_antennas, (int, np.integer)) or num_antennas < 1:
+            raise ValueError("num_antennas must be a positive integer")
+        if not np.isfinite(wavelength) or wavelength <= 0:
+            raise ValueError("wavelength must be positive and finite")
+        if antenna_spacing is None:
+            antenna_spacing = wavelength / 2.0
+        if not np.isfinite(antenna_spacing) or antenna_spacing <= 0:
+            raise ValueError("antenna_spacing must be positive and finite")
         self.num_antennas = num_antennas
         self.wavelength = wavelength
-        self.antenna_spacing = antenna_spacing or wavelength / 2.0
+        self.antenna_spacing = antenna_spacing
 
     def generate_dft_codebook(self) -> np.ndarray:
         """Generate a DFT-based beamforming codebook (far-field).
@@ -71,7 +80,8 @@ class BeamformingCodebook:
         (distance, angle) point using spherical wavefronts.
 
         Args:
-            num_beams: Total number of beams (must equal len(distance_grid) * len(angle_grid)).
+            num_beams: Total number of beams; must equal
+                ``len(distance_grid) * len(angle_grid)``.
             distance_grid: Array of distance values (meters) to focus at.
             angle_grid: Array of angle values (radians) to focus at.
 
@@ -84,9 +94,26 @@ class BeamformingCodebook:
         Note:
             Each beamforming vector v(d, theta) compensates the spherical
             wavefront phase at distance d and angle theta:
-                v_n(d, theta) = exp(j * 2*pi/lambda * r_n(d, theta)) / sqrt(N_t)
+                v_n(d, theta) = exp(-j * 2*pi/lambda * r_n(d, theta)) / sqrt(N_t)
             where r_n is the distance from antenna n to the focal point.
         """
+        distance_grid = np.asarray(distance_grid, dtype=float)
+        angle_grid = np.asarray(angle_grid, dtype=float)
+        if distance_grid.ndim != 1 or angle_grid.ndim != 1:
+            raise ValueError("distance_grid and angle_grid must be one-dimensional")
+        expected_beams = len(distance_grid) * len(angle_grid)
+        if num_beams != expected_beams:
+            raise ValueError(
+                f"num_beams={num_beams} does not match the grid product "
+                f"{expected_beams}"
+            )
+        if expected_beams == 0:
+            raise ValueError("distance_grid and angle_grid must be non-empty")
+        if np.any(~np.isfinite(distance_grid)) or np.any(distance_grid <= 0):
+            raise ValueError("distance_grid must contain positive finite distances")
+        if np.any(~np.isfinite(angle_grid)):
+            raise ValueError("angle_grid must contain finite angles")
+
         positions = (
             np.arange(self.num_antennas) - (self.num_antennas - 1) / 2.0
         ) * self.antenna_spacing
@@ -97,10 +124,14 @@ class BeamformingCodebook:
 
         for d in distance_grid:
             for theta in angle_grid:
-                r_n = np.sqrt(
-                    d**2 + positions**2 - 2 * d * positions * np.sin(theta)
+                r_n = np.hypot(
+                    d - positions * np.sin(theta),
+                    positions * np.cos(theta),
                 )
-                v = np.exp(1j * 2 * np.pi / self.wavelength * r_n)
+                # The generated channel uses exp(-j k r_n); under the h^H v
+                # convention the matched unit-norm beam has the same phase.
+                phase_cycles = np.remainder(r_n, self.wavelength) / self.wavelength
+                v = np.exp(-1j * 2 * np.pi * phase_cycles)
                 v /= np.sqrt(self.num_antennas)
                 beams.append(v)
                 beam_distances.append(d)
@@ -134,6 +165,6 @@ class BeamformingCodebook:
             Normalized beamforming vector with ||v|| = 1.
         """
         norm = np.linalg.norm(v)
-        if norm < 1e-10:
-            return v
+        if not np.isfinite(norm) or norm <= np.finfo(float).tiny:
+            raise ValueError("cannot normalize a zero or non-finite beamformer")
         return v / norm

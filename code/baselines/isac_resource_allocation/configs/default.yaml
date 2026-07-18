@@ -1,21 +1,22 @@
+---
 # Default Configuration for ISAC Resource Allocation
 
 system:
   # Antenna configuration
   Nt: 32          # Number of transmit antennas
   Nr: 32          # Number of receive antennas
-  
+
   # Object configuration
   Q: 3            # Number of sensing targets
   K: 3            # Number of communication users
   L: 1            # Number of ISAC users
-  M: 5            # Total objects (Q + K + L)
-  
+  M: 7            # Total objects (Q + K + L)
+
   # Carrier and bandwidth
   fc: 30e9        # Carrier frequency (Hz)
   P_total: 40.0   # Total transmit power (W)
   B_total: 100e6  # Total bandwidth (Hz)
-  
+
   # Noise parameters
   N0_dBm: -174.0  # Noise PSD (dBm/Hz)
   NF_dB: 10.0     # Noise figure (dB)
@@ -23,31 +24,34 @@ system:
 solver:
   # Optimization parameters
   qos_type: 'detection'  # 'detection', 'localization', 'tracking'
-  fairness: 'maxmin'     # 'maxmin', 'sum', 'proportional'
+  fairness: 'maxmin'     # 'maxmin' or 'sum'
   max_iter: 50           # Maximum AO iterations
   tol: 1e-4              # Convergence tolerance
-  solver: 'default'      # CVXPY solver ('default', 'MOSEK', 'SCS', 'ECOS')
-  
+  solver: 'SLSQP'        # Local constrained bandwidth heuristic
+
   # Communication rate threshold
-  Gamma_c: 1.0           # Minimum rate (bps/Hz)
+  Gamma_c: 1000000.0     # Per-user minimum rate (bit/s)
 
 detection:
   Pfa: 0.01              # Probability of false alarm
-  
+
 localization:
-  w_d: 1.0               # Weight for range estimation
-  w_theta: 1.0           # Weight for angle estimation
-  
+  w_d: 1.0                       # Dimensionless range-information weight
+  w_theta: 1.0                   # Dimensionless angle-information weight
+  range_reference_m: 1.0         # Range scale used to nondimensionalize score
+  angle_reference_rad: 0.001     # Angle scale used to nondimensionalize score
+  angle_noise_bandwidth_hz: 1.0e7  # Fixed angle-noise reference bandwidth
+  d_lambda: 0.5                  # ULA element spacing in wavelengths
+
 tracking:
   dt: 0.1                # Time step (seconds)
-  process_noise_std: 0.5 # Process noise standard deviation
-  measurement_noise_std: 0.1 # Measurement noise standard deviation
+  process_noise_std: 0.5  # Interval-constant acceleration standard deviation
 
 # Simulation parameters
 simulation:
   num_trials: 10         # Number of Monte Carlo trials
   rng_seed: 42           # Random number generator seed
-  
+
 # Output settings
 output:
   save_plots: true       # Save plots to files

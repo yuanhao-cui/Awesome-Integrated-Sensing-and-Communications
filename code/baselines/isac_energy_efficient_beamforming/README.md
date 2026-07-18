@@ -1,238 +1,200 @@
-# Energy-Efficient Beamforming Design for ISAC
+# Energy-efficient ISAC: validated equation-level reference slice
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
-[![CVXPY](https://img.shields.io/badge/CVXPY-1.3+-green.svg)](https://www.cvxpy.org/)
-[![Tests](https://img.shields.io/badge/Tests-71%2F71%20%E2%9C%85-brightgreen.svg)](./tests/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[Tests](./tests/)
+[Reproducibility contract](./reproducibility.yaml)
+[![License: CC BY-SA 4.0](https://img.shields.io/badge/license-CC%20BY--SA%204.0-lightgrey.svg)](../../../LICENSE)
 
-> Reproduction of: J. Zou, S. Sun, C. Masouros, **Y. Cui**, "Energy-Efficient Beamforming Design for Integrated Sensing and Communications Systems," *IEEE Trans. Commun.*, 2024.
->
-> [arXiv:2307.04002](https://arxiv.org/abs/2307.04002) | [IEEE Xplore](https://ieeexplore.ieee.org/document/10393498)
+Reference: Jiaqi Zou, Songlin Sun, Christos Masouros, Yuanhao Cui,
+Ya-Feng Liu, and Derrick Wing Kwan Ng, “Energy-Efficient Beamforming Design
+for Integrated Sensing and Communications Systems,” *IEEE Transactions on
+Communications*, vol. 72, no. 6, pp. 3766–3782, 2024.
+[DOI](https://doi.org/10.1109/TCOMM.2024.3369696) ·
+[institutional manuscript](https://discovery.ucl.ac.uk/id/eprint/10188433/) ·
+[arXiv preprint](https://arxiv.org/abs/2307.04002)
 
-## Overview
+> **Evidence level: equation-level reference.** This code validates a
+> single-user, fixed-beam-direction scalar-power restriction. It does not
+> implement the paper's multi-user Algorithm 1, certify a global multi-user
+> optimum, or claim parity with a paper figure.
 
-This repository provides a clean, modular implementation of energy-efficient beamforming algorithms for Integrated Sensing and Communications (ISAC) systems. The code implements three key algorithms from the paper:
+## Why the scope is deliberately narrow
 
-1. **Dinkelbach + Quadratic Transform** (Algorithm 1): Communication-centric EE maximization
-2. **SCA** (Algorithm 3): Sensing-centric EE maximization  
-3. **Pareto Optimization** (Algorithm 4): Communication-sensing EE tradeoff
+The previous code called proxy SDR/SCA routines “Algorithm 1,” accepted
+inaccurate solver states, recovered beams without post-validating the original
+constraints, and plotted synthetic curves as reproductions. Those claims were
+not scientifically supportable, so the routines and generated figures were
+removed.
 
-### Key Features
+The public paper reports several simulation parameters, but it does not expose
+the channel realizations, communication/sensing noise powers, Monte Carlo
+seeds, original solver code, or numerical figure data. Exact paper-curve
+replication is therefore not independently testable from public evidence.
+This artifact instead makes a smaller claim that has independent numerical
+oracles and explicit tolerances.
 
-- ✅ Modular design with clear separation of concerns
-- ✅ Comprehensive unit tests (71 tests, 100% passing)
-- ✅ Reproducible results with seeded random number generators
-- ✅ Professional visualization scripts
-- ✅ Support for multiple CVXPY solvers (MOSEK, SCS)
+There are also source-level ambiguities that an implementation must not
+hide:
 
-## Quick Start
+- The displayed point-target CRB in (10) omits the `2L` factor used when the
+  same CRB is rearranged in constraint (17).
+- The transmit and receive arrays have different declared sizes (`M` and `N`),
+  while the compact CRB notation uses a single steering vector.
+- The numerical paragraph literally writes `N=20` for the receive array and
+  then `N=30` for the frame length. The system model defines frame length as
+  `L`, so this artifact records the intended values as `N=20, L=30` and
+  discloses the source typo rather than silently changing it.
+- The institutional accepted manuscript uses `P0=30 dBm`, whereas the arXiv
+  source version uses `P0=33 dBm`. The local certificate declares its selected
+  value explicitly and does not treat either version as hidden ground truth.
+
+The implementation evaluates the Fisher information directly from the general
+two-array observation model in (9), treats the complex target coefficient as a
+nuisance parameter, and uses the `2L` convention of (17). Tests compare this
+covariance form against an explicit snapshot-domain Fisher information matrix.
+
+## What is numerically certified
+
+| Claim | Implementation | Independent oracle | Tolerance |
+|---|---|---|---|
+| SINR and communication EE, (2) and (4) | Stream-excluded, binary-scaled powers | Decimal and analytic counterexamples | `3e-13` relative |
+| Radiated power | Normalized binary squared norm | `1e150` amplitude-scale oracle | `2e-15` relative |
+| Steering vectors, (6) and (7) | Paper's cosine convention | Central finite difference for derivatives | `1e-8` relative |
+| Point-target information from (9)/(17) | General two-array Schur complement | Explicit `L`-snapshot FIM | `5e-12` relative |
+| Fixed-direction scalar-power EE optimum | Closed-form inner Dinkelbach step | 500,001-point exhaustive grid | `1.1` grid steps |
+
+The machine-readable contract is [reproducibility.yaml](./reproducibility.yaml).
+
+### Numeric-domain contract
+
+Communication rates are evaluated as `log1p(SINR) / log(2)`. Thus the
+regression `H=1e-10`, `W=1`, and `sigma_c2=1` retains the nonzero rate
+`1.4426950408889633e-20` bit/s/Hz instead of rounding `1 + SINR` to one.
+
+For every user, interference is accumulated directly over columns `j != k`.
+The implementation never computes total received beam power and subtracts the
+desired power: that operation loses a `1e-20` interference term beside a unit
+desired term. The locked counterexample `h=[1,0]`,
+`W=[[1,1e-10],[0,0]]`, and `sigma_c2=1e-30` has SINR
+`9.999999999000001e19`; with `H=I2`, its sum rate is
+`66.43856189760298` bit/s/Hz, not the former false value
+`99.65784284662087`.
+
+Each real and imaginary product in `h_k^H w_j` is first represented exactly as
+a signed integer times a power of two. Products are then accumulated with
+exact integer exponent buckets, so positive and negative terms cancel before
+the residual is converted to a floating-point power. The result is invariant
+to antenna ordering and retains the regression
+`1e280 - 1e280 + 1e-60 = 1e-60`: its SINR is `1e-120` and its rate is
+`1.4426950408889635e-120` bit/s/Hz for unit noise. A single global channel
+scale cannot pass this test because it discards the residual more than 324
+decades below the large terms.
+
+Received powers remain binary mantissa/exponent pairs until their
+dimensionless SINR ratio is formed. This permits finite ratios even when
+individual projection powers would overflow or underflow binary64. Radiated
+power uses the same scale discipline. Positive SINR, spectral efficiency,
+radiated power, or dBm conversion outside the representable output range
+raises an explicit `OverflowError` or `FloatingPointError`; exact zero remains
+zero. All dBm, wavelength, and antenna-spacing inputs must be finite, with
+positive physical values after conversion. These routines are deterministic
+binary64 evaluation primitives, not automatic-differentiation operators; the
+validated scalar Dinkelbach solver uses its analytic inner solution rather
+than differentiating through the accumulator.
+
+The point-target nuisance projection is evaluated after normalizing the beam,
+array, and derivative scales. Identifiability thresholds are relative to the
+normalized response/derivative geometry, never to an absolute energy floor.
+Consequently a common nonzero beam scaling by `s` preserves identifiability
+and changes the CRB by exactly `1 / |s|^2`; this is tested from `1e-12` through
+`1e12`, including the former false-`inf` case at `s=1e-8`. The physical scale
+is restored in the log domain. A mathematically finite CRB above the largest
+binary64 value raises `OverflowError`, while a positive CRB below the smallest
+binary64 subnormal raises `FloatingPointError`. Neither representability case
+is reported as physical unidentifiability.
+
+## Run the verification artifact
+
+From the repository root:
 
 ```bash
-# Clone and navigate to the repository
-cd code/baselines/isac_energy_efficient_beamforming
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run tests
-pytest tests/ -v
-
-# Generate simulation figures
-python examples/generate_figures.py
+uv lock --check
+uv sync --locked --only-group ci
+.venv/bin/python -W error -m code.baselines.isac_energy_efficient_beamforming.examples.verify_reference_slice --json
+.venv/bin/python -W error -m pytest -q code/baselines/isac_energy_efficient_beamforming/tests
 ```
 
-## Results
+The command exits nonzero unless all numeric comparisons pass. Its JSON output
+contains the paper-reported parameters, every local synthetic assumption,
+reference and oracle values, errors, tolerances, the Dinkelbach residual, and
+post-constraint checks. It also emits the `1e-8` CRB scaling counterexample,
+the weak-interference cancellation counterexample, all six permutations of
+the 340-decade cancellation-tail example, the `SINR=1e-20` rate oracle, and a
+`1e150` total-power amplitude-scale oracle. A rendered curve is never used as
+an oracle.
 
-### Simulation Figures
+## Model boundary
 
-The following figures demonstrate the key algorithmic behaviors:
+`SingleUserPowerDinkelbach` fixes a unit beam direction and optimizes only its
+radiated power. In this restriction, the sum rate is concave in power and each
+Dinkelbach inner problem has the exact solution
 
-| Figure | Description |
-|--------|-------------|
-| ![D1](./results/fig_d1_comm_ee_convergence.png) | **(a) Communication EE Convergence**: Shows how $EE_C$ converges over Dinkelbach iterations for different antenna configurations. |
-| ![D2](./results/fig_d2_comm_ee_vs_sinr.png) | **(b) Comm-EE vs SINR Requirement**: Illustrates the tradeoff between communication EE and minimum SINR constraints. |
-| ![D3](./results/fig_d3_sensing_ee_vs_power.png) | **(c) Sensing-EE vs Transmit Power**: Demonstrates sensing EE behavior across different power budgets. |
-| ![D4](./results/fig_d4_pareto_boundary.png) | **(d) Pareto Boundary**: Shows the optimal tradeoff between communication EE and sensing EE for varying user counts. |
-
-## Algorithm Overview
-
-### Dinkelbach's Method (Algorithm 1)
-
-The communication-centric energy efficiency is a fractional program:
-
-$$\text{EE}_C = \frac{\sum_k \log_2(1+\text{SINR}_k)}{\frac{1}{\varepsilon}\sum_k\|w_k\|^2 + P_0}$$
-
-Dinkelbach's method converts this to a parametric subtractive form:
-
-$$\max \; f_1(W) - \lambda f_2(W) \quad \text{with} \quad \lambda_{n+1} = \frac{f_1(W_n)}{f_2(W_n)}$$
-
-**Key steps:**
-1. Initialize $\lambda = 0$
-2. Solve inner optimization via SDR + SCA
-3. Update $\lambda$ and check convergence
-4. Recover rank-1 beamforming vectors
-
-### SCA (Algorithm 3)
-
-Successive Convex Approximation handles non-convex constraints:
-- Rank-1 constraint: $\text{rank}(W_k) = 1$
-- Non-convex quadratic constraints: $\omega \leq \zeta^2/\phi$
-
-**Key steps:**
-1. Linearize non-convex constraints around current point
-2. Solve resulting convex subproblem
-3. Update linearization point
-4. Repeat until convergence
-
-### Pareto Optimization (Algorithm 4)
-
-Traces the optimal tradeoff between communication and sensing EE:
-
-$$\max \; \text{EE}_C \quad \text{s.t.} \quad \text{EE}_S \geq \mathcal{E}$$
-
-By varying threshold $\mathcal{E}$, we obtain the Pareto boundary showing the fundamental communication-sensing tradeoff.
-
-## API Reference
-
-### System Model
-
-```python
-from src.system_model import ISACSystemModel
-
-model = ISACSystemModel(
-    M=16,              # Number of transmit antennas
-    K=4,               # Number of communication users
-    N=20,              # Number of receive antennas for sensing
-    P_max_dbm=30,      # Maximum transmit power (dBm)
-    P0_dbm=33,         # Circuit power (dBm)
-    epsilon=0.35,      # PA efficiency
-    L=30,              # Frame length
-    seed=42,           # Random seed for reproducibility
-)
+```text
+p*(lambda) = clip(epsilon / (lambda ln 2) - sigma_c^2 / |h^H v|^2,
+                  p_min, P_max).
 ```
 
-### Dinkelbach Solver
+`p_min` is obtained exactly from any declared SINR and CRB constraints. The
+returned beam is rejected if the Dinkelbach residual, power budget, SINR, or
+CRB post-check fails. Multi-user beam-direction optimization remains out of
+scope rather than being represented by an unverified surrogate.
 
-```python
-from src.dinkelbach_solver import DinkelbachSolver
+## Parameter provenance
 
-solver = DinkelbachSolver(model, max_dinkelbach_iter=30)
-result = solver.solve(
-    target_angle_deg=90.0,  # Target angle for sensing
-    crb_max=None,           # Optional CRB constraint
-    gamma_min=None,         # Optional SINR constraint
-)
+The source paragraph is interpreted, using the paper's own symbol definitions,
+as `N=20`, `L=30`; it also gives `P_max=30 dBm`, `epsilon=0.35`, and
+`theta=90°`. The source typo and `P0` version difference are disclosed above.
+All channel and noise settings in the local certificate are explicitly marked
+synthetic. The checked artifact uses smaller arrays for fast deterministic CI;
+changing them creates a new experiment, not a paper-figure reproduction.
 
-print(f"EE_C: {result.ee_c:.4f} bits/Hz/J")
-print(f"Sum rate: {result.sum_rate:.4f} bits/Hz")
-print(f"Iterations: {result.n_iterations}")
-```
+## Layout
 
-### Energy Efficiency Metrics
-
-```python
-from src.ee_metrics import compute_ee_c, compute_ee_s, compute_crb
-
-# Communication EE
-ee_c = compute_ee_c(H, W, sigma_c2, epsilon, P0)
-
-# Sensing EE
-ee_s = compute_ee_s(W, a_t, a_r, sigma_s2, L, epsilon, P0)
-
-# Cramér-Rao Bound
-crb = compute_crb(W, a_t, a_r, sigma_s2, L)
-```
-
-### Pareto Optimizer
-
-```python
-from src.pareto_optimizer import ParetoOptimizer
-
-optimizer = ParetoOptimizer(model, n_pareto_points=20)
-pareto_points = optimizer.trace_pareto_boundary(
-    target_angle_deg=90.0,
-    gamma_min=None,
-)
-
-for pt in pareto_points:
-    print(f"EE_C: {pt.ee_c:.4f}, EE_S: {pt.ee_s:.4f}")
-```
-
-## Project Structure
-
-```
+```text
 isac_energy_efficient_beamforming/
-├── src/                          # Core implementation
-│   ├── __init__.py
-│   ├── system_model.py           # ISAC system model (channels, SINR)
-│   ├── ee_metrics.py             # EE_C, EE_S, CRB computation
-│   ├── dinkelbach_solver.py      # Dinkelbach method (Algorithm 1)
-│   ├── sca_solver.py             # SCA iterations (Algorithm 3)
-│   ├── pareto_optimizer.py       # Pareto boundary (Algorithm 4)
-│   ├── quadratic_transform.py    # Quadratic transform utilities
-│   ├── sdr_solver.py             # Semidefinite relaxation
-│   ├── schur_complement.py       # Schur complement utilities
-│   └── baselines.py              # Baseline algorithms
-├── tests/                        # Unit tests (71 tests)
-│   ├── test_system_model.py
-│   ├── test_dinkelbach.py
-│   ├── test_sca.py
-│   ├── test_ee_metrics.py
-│   ├── test_pareto.py
-│   ├── test_quadratic.py
-│   └── test_reproducibility.py
-├── examples/                     # Usage examples
-│   ├── demo.ipynb               # Interactive demo
-│   ├── reproduce_fig2.py        # Reproduce paper Figure 2
-│   ├── reproduce_fig5.py        # Reproduce paper Figure 5
-│   └── generate_figures.py      # Generate simulation figures
-├── results/                      # Generated figures
-│   ├── fig_d1_comm_ee_convergence.png
-│   ├── fig_d2_comm_ee_vs_sinr.png
-│   ├── fig_d3_sensing_ee_vs_power.png
-│   └── fig_d4_pareto_boundary.png
-├── configs/                      # Configuration files
-│   └── default.yaml
-├── requirements.txt              # Python dependencies
-├── README.md                     # This file
-└── LICENSE                       # MIT License
+├── configs/default.yaml
+├── examples/verify_reference_slice.py
+├── reproducibility.yaml
+├── src/
+│   ├── dinkelbach_solver.py
+│   ├── ee_metrics.py
+│   ├── numerics.py
+│   ├── quadratic_transform.py
+│   └── system_model.py
+└── tests/
+    ├── test_dinkelbach.py
+    ├── test_ee_metrics.py
+    ├── test_quadratic.py
+    ├── test_reproducibility.py
+    └── test_system_model.py
 ```
 
-## Known Issues
-
-- **`test_sensing_ee_power_constraint`**: SCA for sensing-centric EE may slightly violate power constraint in edge cases (numerical precision issue)
-- **`test_crb_reproducibility`**: CRB computation has numerical instability for certain channel realizations
-
-These are known limitations of the numerical optimization approach and do not affect the correctness of the algorithms for typical use cases.
-
-## Citation
-
-If you use this code in your research, please cite the original paper:
+## Citation and license
 
 ```bibtex
 @article{zou2024energy,
-  author    = {J. Zou and S. Sun and C. Masouros and Y. Cui},
-  title     = {Energy-Efficient Beamforming Design for Integrated Sensing and Communications Systems},
-  journal   = {IEEE Transactions on Communications},
-  year      = {2024},
-  volume    = {72},
-  number    = {3},
-  pages     = {1634--1649},
-  month     = {March},
-  doi       = {10.1109/TCOMM.2023.3347894}
+  author  = {Zou, Jiaqi and Sun, Songlin and Masouros, Christos and
+             Cui, Yuanhao and Liu, Ya-Feng and Ng, Derrick Wing Kwan},
+  title   = {Energy-Efficient Beamforming Design for Integrated Sensing and
+             Communications Systems},
+  journal = {IEEE Transactions on Communications},
+  volume  = {72},
+  number  = {6},
+  pages   = {3766--3782},
+  year    = {2024},
+  doi     = {10.1109/TCOMM.2024.3369696}
 }
 ```
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
-
-## Acknowledgments
-
-- Original paper by Zou et al., IEEE Trans. Commun., 2024
-- CVXPY team for the convex optimization framework
-- MOSEK ApS for the commercial solver (academic licenses available)
+The implementation is distributed under the repository's
+[CC BY-SA 4.0 license](../../../LICENSE).

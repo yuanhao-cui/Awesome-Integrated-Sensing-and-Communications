@@ -1,0 +1,70 @@
+---
+schema_version: 1
+baseline: csi_ratio_doppler_estimation
+reference:
+  doi: 10.1109/JSEN.2022.3208272
+evidence_level: educational-surrogate
+paper_figure_parity: false
+model: >-
+  Finite-window static-plus-dynamic narrowband CSI ratio, with an algebraic
+  circle fit and weighted unwrapped-phase slope used as a rotation proxy.
+assumptions:
+  - Receiver frequency offset is a truly common multiplicative factor.
+  - The denominator channel stays away from zero over the checked window.
+  - Physical Doppler is known a priori to lie below the Nyquist alias limit.
+  - Rotation sign is not interpreted as approaching or receding direction.
+parameters:
+  seed: 20260717
+  sample_interval_second: 1.0e-3
+  sample_count: 128
+  rotation_frequency_hz: 50.0
+  common_offset_hz: 173.25
+  complex_scale_magnitudes:
+    - 1.0e-100
+    - 1.0e-20
+    - 1.0
+    - 1.0e20
+    - 1.0e100
+  minimum_angular_coverage_rad: 3.141592653589793
+  minimum_weighted_phase_r_squared: 0.95
+  maximum_reliable_phase_cycles_binary64: 1099511627776
+  maximum_finite_complex_component_regression: 1.7e308
+oracle:
+  type: exact-pure-rotation-construction
+  expected:
+    estimated_rotation_frequency_hz: 50.0
+    common_offset_cancellation: true
+    direction: unknown
+    alias_limit_hz: 500.0
+    nonuniform_mobius_traversal_is_rejected: true
+    maximum_finite_equal_complex_inputs_have_unit_ratio: true
+tolerances:
+  frequency_absolute_hz: 1.0e-10
+  common_offset_cancellation_absolute: 5.0e-14
+  scaled_frequency_absolute_hz: 1.0e-10
+evidence:
+  command: >-
+    python scripts/verify_simulation_baseline.py
+    csi_ratio_doppler_estimation --json
+  certificate_checks:
+    - alias_metadata_is_explicit
+    - common_offset_cancels
+    - exact_rotation_frequency
+    - maximum_finite_complex_components_divide_exactly
+    - nonuniform_mobius_traversal_is_rejected
+    - nonzero_complex_scale_invariant
+    - physical_direction_not_inferred
+    - unrepresentable_quotient_is_rejected
+  checks:
+    - exact signed rotation under the unit-test construction
+    - cancellation of a declared common multiplicative offset
+    - invariance to five nonzero complex scales from 1e-100 through 1e100
+    - explicit alias and direction metadata
+    - coverage and weighted phase-linearity validity rejection
+    - warning-free rejection outside the documented phase, path-scale, and SNR domain
+    - component-scaled division at 1.7e308 real and imaginary parts
+limitations:
+  - A general Mobius trajectory does not have uniform phase speed.
+  - The certificate is not a paper algorithm or hardware-data reproduction.
+  - No published figure or reported error curve is certified.
+  - Binary64 phase construction is rejected beyond 2^40 accumulated cycles.

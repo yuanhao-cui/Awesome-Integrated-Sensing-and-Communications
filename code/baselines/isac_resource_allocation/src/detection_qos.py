@@ -1,30 +1,25 @@
-"""
-Detection QoS for ISAC Resource Allocation.
+"""Normalized scaled-central-chi-square detection QoS surrogate.
 
-Implements detection probability metrics from "Sensing as a Service in 6G Perceptive Networks"
-(Eq. 18-21).
+The declared local statistic has two degrees of freedom and, under ``H1``, a
+central chi-square scale of ``1 + SNR``.  This is a teaching model rather than
+a claim that a particular raw-measurement likelihood has been reproduced.
 """
+
+from typing import Optional
 
 import numpy as np
 from scipy import stats
-from typing import Optional, Tuple
-from dataclasses import dataclass
 
 from .system_model import ISACSystem
 
 
 class DetectionQoS:
-    """
-    Detection Quality of Service (Eq. 18-21).
-    
-    Implements detection probability computation under Neyman-Pearson criterion
-    with both max-min fairness and sum (comprehensiveness) objectives.
-    """
-    
+    """Detection probabilities under a normalized two-DOF energy statistic."""
+
     def __init__(self, system: ISACSystem, Pfa: float = 0.01):
         """
         Initialize Detection QoS.
-        
+
         Parameters
         ----------
         system : ISACSystem
@@ -33,42 +28,40 @@ class DetectionQoS:
             Probability of false alarm (default: 0.01)
         """
         self.system = system
+        if not np.isfinite(Pfa) or not 0 < Pfa < 1:
+            raise ValueError("Pfa must lie strictly between zero and one")
         self.Pfa = Pfa
         self._chi2 = stats.chi2(df=2)  # Central chi-squared with 2 DOF
-        self._chi2_nc = None  # Will be set for non-central
-        
-    def _compute_threshold(self, N: int = 1000) -> float:
+
+    def _compute_threshold(self) -> float:
         """
         Compute detection threshold for given Pfa.
-        
-        Parameters
-        ----------
-        N : int
-            Number of samples for threshold computation
-            
+
         Returns
         -------
         threshold : float
             Detection threshold
         """
-        # For Neyman-Pearson: threshold determined by Pfa
-        return self._chi2.ppf(1 - self.Pfa)
-    
+        # ``isf`` avoids the catastrophic cancellation in ``1 - Pfa`` for
+        # small, but representable, false-alarm probabilities.
+        return self._chi2.isf(self.Pfa)
+
     def compute_detection_probability(self, p: np.ndarray, b: np.ndarray,
                                        sigma: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Compute detection probability for each sensing target.
-        
-        From Eq. 18:
-        P_D,q = 1 - F_χ²( 2δ / (N0 σ²) / (1 + p_q S_q) )
-        
+
+        For normalized threshold ``eta = chi2.isf(Pfa, 2)``, compute
+        ``P_D,q = chi2.sf(eta / (1 + SNR_q), 2)``.  With two degrees of
+        freedom this is exactly ``Pfa ** (1 / (1 + SNR_q))``.
+
         where:
         - δ is the detection threshold (determined by Pfa)
         - N0 is the noise power spectral density
         - σ² is the target RCS
         - p_q is the transmit power for target q
         - S_q is the signal-to-noise ratio factor
-        
+
         Parameters
         ----------
         p : np.ndarray
@@ -77,49 +70,55 @@ class DetectionQoS:
             Bandwidth allocation for sensing targets (Q,)
         sigma : np.ndarray, optional
             Target radar cross sections. If None, uses system defaults.
-            
+
         Returns
         -------
         P_D : np.ndarray
             Detection probabilities for each target (Q,)
         """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
+        p = np.asarray(p, dtype=float)
+        b = np.asarray(b, dtype=float)
+
         if sigma is None:
             sigma = self.system.rcs
-        
+
         Q = self.system.params.Q
-        P_D = np.zeros(Q)
-        
-        # Detection threshold from Pfa
-        delta = self._compute_threshold()
-        
-        for q in range(Q):
-            # SNR factor (Eq. 18)
-            snr_q = (p[q] * self.system.beta_sensing[q] * sigma[q]) / \
-                    (self.system.N0 * b[q])
-            
-            # Argument for chi-squared CDF
-            # Scale factor: 2δ / (N0 σ²) / (1 + SNR)
-            arg = 2 * delta / (1 + snr_q)
-            
-            # Non-central chi-squared CDF (2 DOF, non-centrality parameter = SNR)
-            ncp = 2 * snr_q  # Non-centrality parameter
-            P_D[q] = 1 - stats.ncx2.cdf(arg, df=2, nc=ncp)
-        
-        return P_D
-    
+        sigma = np.asarray(sigma, dtype=float)
+        if p.shape != (Q,) or b.shape != (Q,) or sigma.shape != (Q,):
+            raise ValueError(f"p, b, and sigma must have shape ({Q},)")
+        if not (
+            np.all(np.isfinite(p))
+            and np.all(np.isfinite(b))
+            and np.all(np.isfinite(sigma))
+        ):
+            raise ValueError("power, bandwidth, and RCS must be finite")
+        if np.any(p < 0) or np.any(b <= 0) or np.any(sigma < 0):
+            raise ValueError("power/RCS must be non-negative and bandwidth positive")
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            snr = (
+                p
+                * self.system.beta_sensing
+                * sigma
+                / (self.system.N0 * b)
+            )
+        if not np.all(np.isfinite(snr)):
+            raise ValueError(
+                "the normalized sensing SNR is outside the finite numerical domain"
+            )
+
+        # For two degrees of freedom, chi2.sf(x, 2) = exp(-x/2) and
+        # chi2.isf(Pfa, 2) = -2 log(Pfa).  Evaluating the resulting closed
+        # form directly remains accurate throughout the accepted Pfa range.
+        return np.exp(np.log(self.Pfa) / (1.0 + snr))
+
     def compute_detection_prob_simplified(self, p: np.ndarray, b: np.ndarray,
                                           sigma: Optional[np.ndarray] = None) -> np.ndarray:
         """
-        Simplified detection probability computation (closed-form approximation).
-        
-        From Eq. 18:
-        P_D,q = Q_1(√(2 * SNR_q), √(2δ))
-        
-        where Q_1 is the Marcum Q-function.
-        
+        Compatibility wrapper for the normalized energy-detector model.
+
+        This wrapper returns the same scaled-central-chi-square probability as
+        :meth:`compute_detection_probability`.
+
         Parameters
         ----------
         p : np.ndarray
@@ -128,47 +127,27 @@ class DetectionQoS:
             Bandwidth allocation (Q,)
         sigma : np.ndarray, optional
             Target RCS (Q,)
-            
+
         Returns
         -------
         P_D : np.ndarray
             Detection probabilities (Q,)
         """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        if sigma is None:
-            sigma = self.system.rcs
-        
-        Q = self.system.params.Q
-        P_D = np.zeros(Q)
-        
-        delta = self._compute_threshold()
-        
-        for q in range(Q):
-            snr_q = (p[q] * self.system.beta_sensing[q] * sigma[q]) / \
-                    (self.system.N0 * b[q])
-            
-            # Using chi-squared approximation
-            # P_D = 1 - F_χ²(2δ / (1 + SNR_q), 2)
-            arg = 2 * delta / (1 + snr_q)
-            P_D[q] = 1 - stats.chi2.cdf(arg, df=2)
-        
-        return P_D
-    
+        return self.compute_detection_probability(p, b, sigma)
+
     def compute_objective_maxmin(self, p: np.ndarray, b: np.ndarray) -> float:
         """
-        Compute max-min fairness objective (Eq. 20).
-        
+        Compute the local max-min detection objective.
+
         max min_q P_D,q
-        
+
         Parameters
         ----------
         p : np.ndarray
             Power allocation (Q,)
         b : np.ndarray
             Bandwidth allocation (Q,)
-            
+
         Returns
         -------
         objective : float
@@ -176,20 +155,20 @@ class DetectionQoS:
         """
         P_D = self.compute_detection_probability(p, b)
         return np.min(P_D)
-    
+
     def compute_objective_sum(self, p: np.ndarray, b: np.ndarray) -> float:
         """
-        Compute sum (comprehensiveness) objective (Eq. 21).
-        
+        Compute the local sum-detection objective.
+
         max Σ_q P_D,q
-        
+
         Parameters
         ----------
         p : np.ndarray
             Power allocation (Q,)
         b : np.ndarray
             Bandwidth allocation (Q,)
-            
+
         Returns
         -------
         objective : float
@@ -197,14 +176,14 @@ class DetectionQoS:
         """
         P_D = self.compute_detection_probability(p, b)
         return np.sum(P_D)
-    
+
     def detection_probability_gradient(self, p: np.ndarray, b: np.ndarray,
                                         sigma: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Compute gradient of detection probability w.r.t. power.
-        
+
         ∂P_D,q/∂p_q for gradient-based optimization.
-        
+
         Parameters
         ----------
         p : np.ndarray
@@ -213,43 +192,44 @@ class DetectionQoS:
             Bandwidth allocation (Q,)
         sigma : np.ndarray, optional
             Target RCS (Q,)
-            
+
         Returns
         -------
         grad : np.ndarray
             Gradient w.r.t. power (Q,)
         """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        if sigma is None:
-            sigma = self.system.rcs
-        
-        Q = self.system.params.Q
-        grad = np.zeros(Q)
-        
-        delta = self._compute_threshold()
-        eps = 1e-6
-        
-        for q in range(Q):
-            # Finite difference approximation for gradient
-            p_plus = p.copy()
-            p_plus[q] += eps
-            P_D_plus = self.compute_detection_probability(p_plus, b, sigma)[q]
-            
-            p_minus = p.copy()
-            p_minus[q] = max(eps, p[q] - eps)
-            P_D_minus = self.compute_detection_probability(p_minus, b, sigma)[q]
-            
-            grad[q] = (P_D_plus - P_D_minus) / (2 * eps)
-        
-        return grad
-    
-    def is_detectable(self, p: np.ndarray, b: np.ndarray, 
+        p = np.asarray(p, dtype=float)
+        b = np.asarray(b, dtype=float)
+        sigma = self.system.rcs if sigma is None else np.asarray(sigma, dtype=float)
+        probability = self.compute_detection_probability(p, b, sigma)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            coefficient = (
+                self.system.beta_sensing * sigma / (self.system.N0 * b)
+            )
+            snr = p * coefficient
+            denominator = np.square(1.0 + snr)
+            gradient = (
+                probability
+                * (-np.log(self.Pfa))
+                * coefficient
+                / denominator
+            )
+        # An infinite squared denominator represents an asymptotically zero
+        # derivative, whereas a non-finite coefficient is an invalid domain.
+        gradient = np.where(np.isinf(denominator), 0.0, gradient)
+        if not np.all(np.isfinite(coefficient)) or not np.all(
+            np.isfinite(gradient)
+        ):
+            raise ValueError(
+                "detection gradient is outside the finite numerical domain"
+            )
+        return gradient
+
+    def is_detectable(self, p: np.ndarray, b: np.ndarray,
                       threshold: float = 0.9) -> np.ndarray:
         """
         Check if targets are detectable with given probability.
-        
+
         Parameters
         ----------
         p : np.ndarray
@@ -258,11 +238,13 @@ class DetectionQoS:
             Bandwidth allocation (Q,)
         threshold : float
             Required detection probability
-            
+
         Returns
         -------
         detectable : np.ndarray
             Boolean array indicating detectability (Q,)
         """
+        if not np.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError("threshold must lie in [0, 1]")
         P_D = self.compute_detection_probability(p, b)
         return P_D >= threshold

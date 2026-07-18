@@ -1,28 +1,25 @@
-# 🏆 Leaderboard
+# Benchmark Status and Submission Contract
 
-> Standardized benchmark results for ISAC methods.
+There is currently no verified cross-method leaderboard in this directory. The repository does not provide a benchmark runner or a published results file, so placeholder scores and instructions for nonexistent commands have been removed.
 
-## Evaluation Protocol
+## Minimum protocol for a future benchmark
 
-All baselines are evaluated on the following metrics:
+A benchmark result is eligible for review only when the contribution records:
 
-| Metric | Description | Unit |
-|--------|-------------|------|
-| BER | Bit Error Rate (communication performance) | - |
-| CRB | Cramér-Rao Bound (sensing accuracy) | rad² / m² |
-| Rate | Spectral Efficiency | bps/Hz |
-| Pareto Score | Trade-off quality (Area under Pareto curve) | - |
+1. the exact task, dataset or simulator version, preprocessing, split, and exclusion rules;
+2. all channel, waveform, array, power, noise, target, and hardware assumptions;
+3. metric definitions, units, aggregation, confidence intervals, and failure handling;
+4. dependency lockfile or pinned environment, deterministic seeds where supported, and the exact command;
+5. a machine-readable result artifact and provenance linking it to a commit;
+6. comparison methods run under the same protocol, with original-source citations;
+7. independent rerun evidence within stated numerical tolerances.
 
-## Results
+## Metric discipline
 
-> 🚧 No results yet. Baselines are being developed.
+BER, communication rate, detection probability, localization error, CRB, energy efficiency, latency, and Pareto summaries describe different objectives. A single “Pareto score” is not meaningful until its normalization, integration domain, dominance rule, and uncertainty treatment are fixed.
 
-| Method | BER @ 20dB SNR | CRB (Delay) | Rate | Pareto | Date |
-|--------|----------------|-------------|------|--------|------|
-| - | - | - | - | - | - |
+## Publication rule
 
-## How to Submit
+No row should be called “state of the art,” “best,” or “reproduced” solely because a script completed. Numerical claims require a checked result artifact and comparison to the cited reference under aligned assumptions.
 
-1. Run `python benchmark/evaluate.py --method your_method`
-2. Submit the generated `results.json` via PR
-3. See [CONTRIBUTING.md](../CONTRIBUTING.md) for details
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the repository-wide evidence policy.

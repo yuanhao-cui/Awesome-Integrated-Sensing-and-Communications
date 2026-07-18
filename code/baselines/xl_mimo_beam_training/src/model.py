@@ -1,33 +1,33 @@
 """
 CNN-based near-field beam training model.
 
-Implements a UNet-like convolutional neural network that maps estimated CSI
+Implements a compact convolutional encoder-decoder that maps estimated CSI
 to phase-only beamforming vectors for XL-MIMO systems.
 
-Architecture (from paper Section IV-A):
+Paper-inspired repository architecture:
     Input: Real and imaginary parts of estimated CSI (batch, 1, 2, Nt)
-    Output: Phase values in [-1, 1] mapped to unit-norm beamforming vector (batch, Nt)
+    Output: Phase values in [-1, 1] mapped to unit-modulus coefficients
 
 The encoder progressively downsamples along the antenna dimension while expanding
 feature channels, then the decoder upsamples back to the original resolution.
 A final linear layer + tanh produces the beamforming phases.
 
 Reference:
-    Eq. (15)-(16) in the paper describe the CNN input/output mapping.
+    The cited work motivates the CSI-to-phase mapping; this compact UNet-like
+    network is not asserted to be an exact architecture transcription.
 """
 
 from collections import OrderedDict
-from typing import Optional
 
 import torch
 import torch.nn as nn
 
 
 class BeamTrainingNet(nn.Module):
-    """UNet-like CNN for near-field beam training in XL-MIMO.
+    """Compact CNN encoder-decoder for synthetic near-field beam training.
 
     Takes estimated CSI (real + imaginary concatenated along dim=1) and outputs
-    phase values for constructing a unit-norm analog beamforming vector.
+    phase values for constructing per-element unit-modulus coefficients.
 
     Args:
         in_channels: Number of input channels (default: 1 for complex CSI
@@ -45,7 +45,16 @@ class BeamTrainingNet(nn.Module):
         antenna_count: int = 256,
     ):
         super().__init__()
+        if not isinstance(in_channels, int) or in_channels < 1:
+            raise ValueError("in_channels must be a positive integer")
+        if out_channels != 1:
+            raise ValueError("out_channels must be 1 for the fixed phase-output head")
+        if not isinstance(init_features, int) or init_features < 1:
+            raise ValueError("init_features must be a positive integer")
+        if not isinstance(antenna_count, int) or antenna_count < 4 or antenna_count % 4:
+            raise ValueError("antenna_count must be a positive multiple of 4")
         self.antenna_count = antenna_count
+        self.in_channels = in_channels
         features = init_features
 
         # Encoder path
@@ -81,6 +90,9 @@ class BeamTrainingNet(nn.Module):
             Phase values of shape (batch, Nt) in [-1, 1]. These are multiplied
             by pi in trans_vrf to obtain the actual phases for beamforming.
         """
+        expected = (self.in_channels, 2, self.antenna_count)
+        if x.ndim != 4 or tuple(x.shape[1:]) != expected:
+            raise ValueError(f"x must have shape (batch, {expected[0]}, 2, {expected[2]})")
         enc1 = self.encoder1(x)
         enc2 = self.encoder2(self.pool1(enc1))
         enc3 = self.encoder3(self.pool2(enc2))

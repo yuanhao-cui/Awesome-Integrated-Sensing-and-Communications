@@ -1,249 +1,204 @@
+"""Deterministic system model for the validated energy-efficiency slice.
+
+The steering convention follows (6)--(7) of Zou et al., IEEE TCOM 2024:
+``exp(-j 2 pi d m cos(theta) / wavelength)``.  The public manuscript does
+not specify a channel distribution or receiver-noise value for its numerical
+figures, so this module labels its seeded CN(0, 1) channel as synthetic.
 """
-ISAC System Model
-=================
 
-Implements the system model for Integrated Sensing and Communications (ISAC)
-with energy-efficient beamforming design.
+from __future__ import annotations
 
-System model (Section II):
-    - ISAC BS with M transmit antennas
-    - K single-antenna communication users
-    - N receive antennas for sensing (point-like target at angle θ)
-    - Beamforming matrix W = [w_1, ..., w_K]
-
-Key equations:
-    - SINR (Eq. 2): SINR_k = |h_k^H w_k|² / (σ_c² + Σ_{j≠k} |h_k^H w_j|²)
-    - Communication EE (Eq. 4): EE_C = Σ_k log₂(1+SINR_k) / ((1/ε)Σ_k||w_k||² + P₀)
-    - CRB (Eq. 10): Complex formula with steering vectors
-
-Reference: Zou et al., IEEE Trans. Commun., 2024
-"""
+from dataclasses import dataclass
+import math
 
 import numpy as np
-from typing import Optional, Tuple
+
+from .numerics import stable_sinr, stable_squared_norm
+
+
+def dbm_to_watt(value_dbm: float) -> float:
+    """Convert finite dBm to a positive representable binary64 watt value."""
+
+    value_dbm = float(value_dbm)
+    if not np.isfinite(value_dbm):
+        raise ValueError("value_dbm must be finite")
+    log_watt = (value_dbm / 10.0 - 3.0) * math.log(10.0)
+    if log_watt > math.log(np.finfo(float).max):
+        raise OverflowError("dBm value converts above the binary64 watt range")
+    if log_watt < math.log(np.nextafter(0.0, 1.0)):
+        raise FloatingPointError(
+            "dBm value converts below the positive binary64 watt range"
+        )
+    with np.errstate(over="raise", under="ignore", invalid="raise"):
+        result = float(np.exp(log_watt))
+    if not np.isfinite(result):
+        raise OverflowError("dBm value converts above the binary64 watt range")
+    if result == 0.0:
+        raise FloatingPointError(
+            "dBm value converts below the positive binary64 watt range"
+        )
+    return result
+
+
+@dataclass(frozen=True)
+class PaperParameterProvenance:
+    """Publicly reported parameters and explicit local assumptions."""
+
+    source_doi: str = "10.1109/TCOMM.2024.3369696"
+    public_parameters: tuple[str, ...] = (
+        "N=20 receive antennas",
+        "L=30 snapshots",
+        "P_max=30 dBm",
+        "epsilon=0.35",
+        "theta=90 degrees",
+    )
+    local_assumptions: tuple[str, ...] = (
+        "single user",
+        "seeded CN(0,1) communication channel",
+        "communication and sensing noise powers are explicit inputs",
+        "unit target reflection magnitude",
+    )
 
 
 class ISACSystemModel:
-    """
-    ISAC system model for energy-efficient beamforming.
+    """ISAC model used by the equation-level reference implementation.
 
-    Parameters
-    ----------
-    M : int
-        Number of transmit antennas at BS (default: 16)
-    K : int
-        Number of single-antenna communication users (default: 4)
-    N : int
-        Number of receive antennas for sensing (default: 20)
-    P_max_dbm : float
-        Maximum transmit power in dBm (default: 30 dBm)
-    P0_dbm : float
-        Circuit power in dBm (default: 33 dBm)
-    epsilon : float
-        Power amplifier efficiency (default: 0.35)
-    sigma_c_db : float
-        Noise power for communication users in dB (default: -80 dB)
-    sigma_s_db : float
-        Noise power for sensing in dB (default: -80 dB)
-    L : int
-        Frame length (default: 30)
-    wavelength : float
-        Signal wavelength (default: 1.0, normalized)
-    d : float
-        Antenna spacing (default: 0.5 wavelength)
-
-    Attributes
-    ----------
-    P_max : float
-        Maximum transmit power (linear)
-    P0 : float
-        Circuit power (linear)
-    sigma_c2 : float
-        Communication noise power (linear)
-    sigma_s2 : float
-        Sensing noise power (linear)
-    H : np.ndarray
-        Channel matrix (K x M), Rayleigh fading
+    This class intentionally enforces the paper's ``K <= M <= N`` array
+    regime.  Power-valued noise inputs use dBm and are converted to watts;
+    this avoids the former ambiguous ``*_db`` convention.
     """
 
     def __init__(
         self,
         M: int = 16,
-        K: int = 4,
+        K: int = 1,
         N: int = 20,
         P_max_dbm: float = 30.0,
-        P0_dbm: float = 33.0,
+        P0_dbm: float = 30.0,
         epsilon: float = 0.35,
-        sigma_c_db: float = -80.0,
-        sigma_s_db: float = -80.0,
+        sigma_c_dbm: float = -80.0,
+        sigma_s_dbm: float = -80.0,
         L: int = 30,
         wavelength: float = 1.0,
         d: float = 0.5,
-        seed: Optional[int] = None,
-    ):
-        """Initialize ISAC system model with parameters from Section VI."""
+        seed: int | None = 0,
+    ) -> None:
+        for name, value in (("M", M), ("K", K), ("N", N), ("L", L)):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if not K <= M <= N:
+            raise ValueError("the reference model requires K <= M <= N")
+        if not 0.0 < epsilon <= 1.0:
+            raise ValueError("epsilon must lie in (0, 1]")
+        if not np.isfinite(wavelength) or wavelength <= 0.0:
+            raise ValueError("wavelength must be finite and positive")
+        if not np.isfinite(d) or d <= 0.0:
+            raise ValueError("d must be finite and positive")
+
         self.M = M
         self.K = K
         self.N = N
         self.L = L
-        self.epsilon = epsilon
-        self.wavelength = wavelength
-        self.d = d
-
-        # Convert dB to linear
-        self.P_max = 10 ** (P_max_dbm / 10) / 1000  # dBm to Watts
-        self.P0 = 10 ** (P0_dbm / 10) / 1000
-        self.sigma_c2 = 10 ** (sigma_c_db / 10)
-        self.sigma_s2 = 10 ** (sigma_s_db / 10)
-
-        # Random number generator
+        self.epsilon = float(epsilon)
+        self.wavelength = float(wavelength)
+        self.d = float(d)
+        self.P_max = dbm_to_watt(P_max_dbm)
+        self.P0 = dbm_to_watt(P0_dbm)
+        self.sigma_c2 = dbm_to_watt(sigma_c_dbm)
+        self.sigma_s2 = dbm_to_watt(sigma_s_dbm)
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
+        self.H = self._draw_synthetic_channels()
 
-        # Generate channel matrix (Rayleigh fading, Eq. model in Section VI)
-        # h_k ~ CN(0, I_M), normalized
-        self.H = (
-            self.rng.standard_normal((K, M))
-            + 1j * self.rng.standard_normal((K, M))
-        ) / np.sqrt(2)
-
-    def steering_vector_tx(self, theta_rad: float) -> np.ndarray:
-        """
-        Compute transmit steering vector a_t(θ).
-
-        For ULA with M antennas, element m:
-            a_t(θ)_m = exp(j * 2π/λ * d * m * sin(θ))
-
-        Parameters
-        ----------
-        theta_rad : float
-            Target angle in radians
-
-        Returns
-        -------
-        np.ndarray
-            Transmit steering vector (M,) complex
-        """
-        m_indices = np.arange(self.M)
-        phase = 2 * np.pi / self.wavelength * self.d * m_indices * np.sin(theta_rad)
-        return np.exp(1j * phase)
-
-    def steering_vector_rx(self, theta_rad: float) -> np.ndarray:
-        """
-        Compute receive steering vector a_r(θ).
-
-        For ULA with N antennas, element n:
-            a_r(θ)_n = exp(j * 2π/λ * d * n * sin(θ))
-
-        Parameters
-        ----------
-        theta_rad : float
-            Target angle in radians
-
-        Returns
-        -------
-        np.ndarray
-            Receive steering vector (N,) complex
-        """
-        n_indices = np.arange(self.N)
-        phase = 2 * np.pi / self.wavelength * self.d * n_indices * np.sin(theta_rad)
-        return np.exp(1j * phase)
-
-    def get_channel(self, k: int) -> np.ndarray:
-        """
-        Get channel vector for user k.
-
-        Parameters
-        ----------
-        k : int
-            User index (0-indexed)
-
-        Returns
-        -------
-        np.ndarray
-            Channel vector h_k (M,) complex
-        """
-        return self.H[k, :]
-
-    def compute_sinr(self, k: int, W: np.ndarray) -> float:
-        """
-        Compute SINR for user k (Eq. 2).
-
-        SINR_k = |h_k^H w_k|² / (σ_c² + Σ_{j≠k} |h_k^H w_j|²)
-
-        Parameters
-        ----------
-        k : int
-            User index (0-indexed)
-        W : np.ndarray
-            Beamforming matrix (M x K), column k is w_k
-
-        Returns
-        -------
-        float
-            SINR for user k
-        """
-        h_k = self.get_channel(k)
-        signal = np.abs(h_k.conj() @ W[:, k]) ** 2
-        interference = sum(
-            np.abs(h_k.conj() @ W[:, j]) ** 2 for j in range(self.K) if j != k
-        )
-        return signal / (self.sigma_c2 + interference)
-
-    def compute_sinr_vector(self, W: np.ndarray) -> np.ndarray:
-        """
-        Compute SINR for all users.
-
-        Parameters
-        ----------
-        W : np.ndarray
-            Beamforming matrix (M x K)
-
-        Returns
-        -------
-        np.ndarray
-            SINR values for each user (K,)
-        """
-        return np.array([self.compute_sinr(k, W) for k in range(self.K)])
-
-    def compute_total_power(self, W: np.ndarray) -> float:
-        """
-        Compute total transmit power Σ_k ||w_k||².
-
-        Parameters
-        ----------
-        W : np.ndarray
-            Beamforming matrix (M x K)
-
-        Returns
-        -------
-        float
-            Total transmit power
-        """
-        return np.sum(np.abs(W) ** 2)
-
-    def regenerate_channels(self, seed: Optional[int] = None):
-        """
-        Regenerate channel matrix with new random realization.
-
-        Parameters
-        ----------
-        seed : int, optional
-            Random seed for reproducibility
-        """
-        if seed is not None:
-            self.rng = np.random.default_rng(seed)
-        self.H = (
+    def _draw_synthetic_channels(self) -> np.ndarray:
+        return (
             self.rng.standard_normal((self.K, self.M))
             + 1j * self.rng.standard_normal((self.K, self.M))
-        ) / np.sqrt(2)
+        ) / np.sqrt(2.0)
+
+    def _steering(self, size: int, theta_rad: float) -> np.ndarray:
+        if not np.isfinite(theta_rad):
+            raise ValueError("theta_rad must be finite")
+        indices = np.arange(size, dtype=float)
+        phase = (
+            -2.0
+            * np.pi
+            * self.d
+            * indices
+            * np.cos(theta_rad)
+            / self.wavelength
+        )
+        return np.exp(1j * phase)
+
+    def _steering_derivative(self, size: int, theta_rad: float) -> np.ndarray:
+        steering = self._steering(size, theta_rad)
+        indices = np.arange(size, dtype=float)
+        coefficient = (
+            1j
+            * 2.0
+            * np.pi
+            * self.d
+            * indices
+            * np.sin(theta_rad)
+            / self.wavelength
+        )
+        return coefficient * steering
+
+    def steering_vector_tx(self, theta_rad: float) -> np.ndarray:
+        """Return the M-element transmit steering vector."""
+
+        return self._steering(self.M, theta_rad)
+
+    def steering_vector_rx(self, theta_rad: float) -> np.ndarray:
+        """Return the N-element receive steering vector."""
+
+        return self._steering(self.N, theta_rad)
+
+    def steering_derivative_tx(self, theta_rad: float) -> np.ndarray:
+        """Return the analytic derivative of the transmit steering vector."""
+
+        return self._steering_derivative(self.M, theta_rad)
+
+    def steering_derivative_rx(self, theta_rad: float) -> np.ndarray:
+        """Return the analytic derivative of the receive steering vector."""
+
+        return self._steering_derivative(self.N, theta_rad)
+
+    def get_channel(self, k: int) -> np.ndarray:
+        if not 0 <= k < self.K:
+            raise IndexError(f"user index {k} is outside [0, {self.K})")
+        return self.H[k].copy()
 
     def get_csi(self) -> np.ndarray:
-        """
-        Get full channel state information.
-
-        Returns
-        -------
-        np.ndarray
-            Channel matrix H (K x M) complex
-        """
         return self.H.copy()
+
+    def set_csi(self, channels: np.ndarray) -> None:
+        channels = np.asarray(channels, dtype=complex)
+        if channels.shape != (self.K, self.M):
+            raise ValueError(f"channels must have shape {(self.K, self.M)}")
+        if not np.all(np.isfinite(channels)):
+            raise ValueError("channels must be finite")
+        self.H = channels.copy()
+
+    def regenerate_channels(self, seed: int | None = None) -> None:
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
+        self.H = self._draw_synthetic_channels()
+
+    def compute_sinr(self, k: int, W: np.ndarray) -> float:
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.M, self.K):
+            raise ValueError(f"W must have shape {(self.M, self.K)}")
+        return stable_sinr(k, self.get_channel(k), W, self.sigma_c2)
+
+    def compute_sinr_vector(self, W: np.ndarray) -> np.ndarray:
+        return np.asarray([self.compute_sinr(k, W) for k in range(self.K)])
+
+    def compute_total_power(self, W: np.ndarray) -> float:
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.M, self.K):
+            raise ValueError(f"W must have shape {(self.M, self.K)}")
+        return stable_squared_norm(W)
+
+
+__all__ = ["ISACSystemModel", "PaperParameterProvenance", "dbm_to_watt"]

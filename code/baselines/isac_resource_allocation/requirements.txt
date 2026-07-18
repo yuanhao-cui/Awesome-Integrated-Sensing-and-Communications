@@ -1,5 +1,5 @@
-numpy>=1.21.0
-scipy>=1.7.0
-cvxpy>=1.2.0
-matplotlib>=3.5.0
-pyyaml>=6.0
+-c ../../../requirements-ci.txt
+numpy
+scipy
+PyYAML
+pytest

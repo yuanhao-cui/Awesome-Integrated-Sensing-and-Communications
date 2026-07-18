@@ -1,14 +1,11 @@
-"""
-ISAC Resource Allocation Framework.
+"""Educational ISAC resource-allocation surrogates.
 
-Unified framework for ISAC resource allocation with three sensing QoS metrics:
-- Detection QoS (Eq. 18-21)
-- Localization QoS (Eq. 22-31)
-- Tracking QoS (Eq. 44-47)
+The modules expose local synthetic detection, localization, and tracking
+proxies. They are not a complete reimplementation of the reference paper.
 
 Reference: "Sensing as a Service in 6G Perceptive Networks: A Unified Framework for ISAC Resource Allocation"
 Authors: Fuwang Dong, Fan Liu, Yuanhao Cui, Wei Wang, Kaifeng Han, Zhiqin Wang
-IEEE Transactions on Wireless Communications, 2022
+IEEE Transactions on Wireless Communications, 2023
 """
 
 from .system_model import ISACSystem
@@ -20,8 +17,6 @@ from .ao_solver import AOSolver, AOResult
 from .fairness import FairnessMetrics, FairnessType
 
 __version__ = "1.0.0"
-__author__ = "Fuwang Dong, Fan Liu, Yuanhao Cui, Wei Wang, Kaifeng Han, Zhiqin Wang"
-
 __all__ = [
     "ISACSystem",
     "DetectionQoS",

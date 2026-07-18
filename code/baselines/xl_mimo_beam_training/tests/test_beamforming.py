@@ -5,7 +5,8 @@ import numpy as np
 
 import sys
 sys.path.insert(0, "..")
-from src.beamforming import BeamformingCodebook
+from ..src.beamforming import BeamformingCodebook
+from ..src.channel import NearFieldChannel
 
 
 class TestBeamformingCodebook:
@@ -64,6 +65,41 @@ class TestBeamformingCodebook:
         norms = np.linalg.norm(W, axis=0)
         assert np.allclose(norms, 1.0, atol=1e-10)
 
+    def test_polar_codebook_extreme_distance_is_finite(self, codebook):
+        W, _, _ = codebook.generate_polar_codebook(
+            1,
+            np.array([1e308]),
+            np.array([0.2]),
+        )
+        assert np.all(np.isfinite(W))
+        np.testing.assert_allclose(np.linalg.norm(W[:, 0]), 1.0, rtol=1e-14)
+
+    def test_polar_codebook_rejects_mismatched_beam_count(self, codebook):
+        """The declared beam count cannot be silently ignored."""
+        with pytest.raises(ValueError, match="grid product"):
+            codebook.generate_polar_codebook(
+                999,
+                np.array([20.0]),
+                np.array([0.2]),
+            )
+
+    def test_polar_beam_matches_channel_phase_convention(self):
+        """A focal beam coherently combines the matching spherical channel."""
+        num_antennas = 32
+        distance = 20.0
+        angle = 0.2
+        channel = NearFieldChannel(num_antennas=num_antennas)
+        codebook = BeamformingCodebook(num_antennas=num_antennas)
+        W, _, _ = codebook.generate_polar_codebook(
+            1,
+            np.array([distance]),
+            np.array([angle]),
+        )
+        h = channel.generate_channel(distance, angle)
+        h_phase = h / np.abs(h) / np.sqrt(num_antennas)
+        gain = codebook.compute_beamforming_gain(h_phase, W[:, 0])
+        np.testing.assert_allclose(gain, 1.0, rtol=1e-12)
+
     def test_beamforming_gain(self, codebook):
         """Test beamforming gain computation."""
         # Simple case: aligned h and v should give high gain
@@ -78,3 +114,18 @@ class TestBeamformingCodebook:
         v_norm = BeamformingCodebook.normalize_beamformer(v)
         norm = np.linalg.norm(v_norm)
         assert np.isclose(norm, 1.0, atol=1e-10), f"Expected norm 1, got {norm}"
+
+        with pytest.raises(ValueError, match="zero"):
+            BeamformingCodebook.normalize_beamformer(np.zeros(4, dtype=complex))
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"num_antennas": 0},
+            {"wavelength": 0.0},
+            {"antenna_spacing": 0.0},
+        ],
+    )
+    def test_invalid_codebook_configuration_is_rejected(self, kwargs):
+        with pytest.raises(ValueError):
+            BeamformingCodebook(**kwargs)

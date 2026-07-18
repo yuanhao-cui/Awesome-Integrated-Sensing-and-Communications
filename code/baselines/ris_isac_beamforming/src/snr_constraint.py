@@ -1,47 +1,31 @@
-"""SNR-constrained joint beamforming and reflection design.
+"""SNR-constrained feasibility iteration for the local RIS surrogate.
 
-Solves Problem 1 (target detection formulation):
-    max  Σ_k R_k  (sum rate)
-    s.t. SNR_sensing ≥ γ_min  (detection requirement)
-         SINR_k ≥ γ_k         (communication QoS)
-         Σ||w_k||² ≤ P_max   (power budget)
-         |θ_l| = 1, ∀l       (RIS unit-modulus)
-
-Solution approach: Alternating Optimization with SDR beamforming
-and coordinate-ascent RIS phase optimization.
-
-Reference: Section IV, Problem P1 in
-    Rang Liu et al., IEEE TWC 2024, arXiv:2301.11134.
+It alternates a conservative minimum-power SOCP for fixed phases with a
+monotone coordinate update of the independent-stream sensing SNR. It is not
+the paper's Algorithm 1 and makes no paper-optimality claim.
 """
 
-import numpy as np
 import cvxpy as cp
-from typing import Optional, Tuple
+import numpy as np
 
 from .system_model import RIS_ISAC_System
 from .beamforming import BeamformingOptimizer, _solve_problem
+from .numerics import db_to_linear, stable_squared_norm
 from .ris_phase import RISPhaseOptimizer
 
 
 class SNRConstrainedSolver:
-    """Solver for SNR-constrained RIS-ISAC problem (Problem P1).
+    """Find a locally feasible SNR/SINR/power tuple.
 
-    Jointly optimizes BS beamforming and RIS phase shifts to
-    maximize communication sum rate subject to radar detection
-    SNR constraint.
-
-    AO Algorithm:
-        1. Fix θ, optimize W via WMMSE + SDR with SINR + SNR constraints
-        2. Fix W, optimize θ via grid-search coordinate ascent
-        3. Repeat until convergence
+    Each returned tuple is post-validated in the original local surrogate.
 
     Attributes:
         system: RIS-ISAC system model.
         M: BS antenna count.
         K: User count.
         L: RIS element count.
-        P_max: Power budget (mW).
-        noise_power: Noise variance (mW).
+        P_max: Power budget (W).
+        noise_power: Noise variance (W).
         snr_min: Minimum radar SNR (linear).
         sinr_thresh: SINR threshold (linear).
         max_iter: Maximum AO iterations.
@@ -63,6 +47,16 @@ class SNRConstrainedSolver:
             max_iter: Maximum alternating optimization iterations.
             tol: Convergence tolerance.
         """
+        if not np.isfinite(snr_min_dB):
+            raise ValueError("snr_min_dB must be finite")
+        if (
+            not isinstance(max_iter, int)
+            or isinstance(max_iter, bool)
+            or max_iter < 1
+        ):
+            raise ValueError("max_iter must be a positive integer")
+        if not np.isfinite(tol) or tol <= 0:
+            raise ValueError("tol must be positive and finite")
         self.system = system
         self.M = system.M
         self.K = system.K
@@ -71,7 +65,7 @@ class SNRConstrainedSolver:
         self.noise_power = system.noise_power
 
         self.snr_min_dB = snr_min_dB
-        self.snr_min = 10 ** (snr_min_dB / 10)
+        self.snr_min = db_to_linear(snr_min_dB, "snr_min_dB")
 
         self.sinr_thresh_dB = system.sinr_thresh_dB
         self.sinr_thresh = system.sinr_thresh
@@ -95,14 +89,19 @@ class SNRConstrainedSolver:
         return a_bs + a_ris.T @ Theta @ H_BR
 
     def solve(self) -> dict:
-        """Solve the SNR-constrained problem via alternating optimization.
+        """Run a safeguarded feasibility iteration.
 
         Algorithm:
-            1. Initialize RIS phases (sensing-optimal).
-            2. Repeat until convergence:
-                a. Fix θ, optimize W via WMMSE + SDR with SNR constraint.
-                b. Fix W, optimize θ via coordinate ascent.
-            3. Return solution.
+            1. Improve the RIS phases by a monotone sensing-SNR grid sweep.
+            2. Solve the fixed-phase minimum-power SOCP.
+            3. Propose another monotone sensing-SNR phase update.
+            4. Accept it only when the re-solved feasible transmit power does
+               not increase; otherwise restore the last certified tuple.
+
+        The safeguard gives a monotone, bounded power certificate for this
+        local surrogate. It is not the alternating algorithm in the cited
+        paper. ``converged`` only denotes termination of this declared
+        safeguarded iteration.
 
         Returns:
             Dictionary with keys:
@@ -112,49 +111,75 @@ class SNRConstrainedSolver:
                 'snr_sensing': Achieved radar SNR (linear).
                 'converged': Whether AO converged.
                 'iterations': Number of AO iterations.
-                'history': List of sum_rate per iteration.
+                'history': List of sum-rate values for accepted iterates.
+                'power_history': Nonincreasing accepted transmit powers.
         """
         sinr_thresholds = np.full(self.K, self.sinr_thresh)
 
-        # Initialize with matched filter beamforming
-        W = np.zeros((self.M, self.K), dtype=complex)
-        for k in range(self.K):
-            h_k = self.system.effective_channel(k)
-            W[:, k] = h_k.conj() / np.linalg.norm(h_k)
-        W *= np.sqrt(self.P_max / self.K) / np.linalg.norm(W, axis=0)
+        # Initialize with matched-filter columns under the h^H w convention.
+        W = self._initial_beamformers()
 
-        # Optimize RIS for sensing initially
-        self.ris_optimizer.optimize_for_snr(W, self.snr_min_dB)
+        # Improve the physical independent-stream sensing SNR initially.
+        self.ris_optimizer.optimize_for_snr(W)
 
-        history = []
-        prev_rate = -np.inf
+        W_reference = self._feasible_sca_reference(sinr_thresholds)
+        W, _ = self._solve_beamforming_socp(
+            sinr_thresholds, W_reference
+        )
+        power = stable_squared_norm(W)
+        sum_rate = self.system.compute_sum_rate(W)
+        history = [sum_rate]
+        power_history = [power]
         converged = False
-        sum_rate = 0.0
 
-        for it in range(self.max_iter):
-            # Step 1: Optimize beamforming W for fixed θ (with SNR constraint)
-            W, _ = self._optimize_beamforming_wmmse_with_snr(sinr_thresholds)
+        for _ in range(1, self.max_iter):
+            accepted_theta = self.system.theta.copy()
+            accepted_W = W.copy()
+            accepted_power = power
+            accepted_rate = sum_rate
 
-            # Step 2: Optimize RIS phases θ for fixed W
-            snr_current = self.system.compute_snr_sensing(np.sum(W, axis=1))
-
-            if snr_current < self.snr_min:
-                # Prioritize sensing
-                self.ris_optimizer.optimize_for_snr(W, self.snr_min_dB)
-            else:
-                # Balance communication and sensing
-                self.ris_optimizer.optimize_joint(W, sensing_weight=0.3)
-
-            # Compute current sum rate
-            sum_rate = self.system.compute_sum_rate(W)
-            snr_sensing = self.system.compute_snr_sensing(np.sum(W, axis=1))
-            history.append(sum_rate)
-
-            # Check convergence
-            if abs(sum_rate - prev_rate) < self.tol * max(abs(sum_rate), 1e-6):
+            self.ris_optimizer.optimize_for_snr(W)
+            try:
+                candidate_reference = self._feasible_sca_reference(
+                    sinr_thresholds
+                )
+            except RuntimeError:
+                self.system.set_ris_phases(accepted_theta)
+                W = accepted_W
+                power = accepted_power
+                sum_rate = accepted_rate
                 converged = True
                 break
-            prev_rate = sum_rate
+            candidate_W, _ = self._solve_beamforming_socp(
+                sinr_thresholds, candidate_reference
+            )
+            candidate_power = stable_squared_norm(candidate_W)
+            candidate_rate = self.system.compute_sum_rate(candidate_W)
+            relative_change = abs(accepted_power - candidate_power) / max(
+                accepted_power, 1e-15
+            )
+
+            if candidate_power > accepted_power * (1.0 + 1e-8):
+                self.system.set_ris_phases(accepted_theta)
+                W = accepted_W
+                power = accepted_power
+                sum_rate = accepted_rate
+                converged = True
+                break
+
+            W = candidate_W
+            power = candidate_power
+            sum_rate = candidate_rate
+            history.append(sum_rate)
+            power_history.append(power)
+            if relative_change < self.tol:
+                converged = True
+                break
+
+        self.bf_optimizer._validate_physical_solution(W, sinr_thresholds)
+        snr_sensing = self.system.compute_snr_sensing(W)
+        if snr_sensing < self.snr_min * (1.0 - 5e-4):
+            raise RuntimeError("Final AO iterate violates the sensing-SNR constraint")
 
         return {
             "W": W,
@@ -162,113 +187,170 @@ class SNRConstrainedSolver:
             "sum_rate": sum_rate,
             "snr_sensing": snr_sensing,
             "converged": converged,
-            "iterations": it + 1,
+            "iterations": len(power_history),
             "history": history,
+            "power_history": power_history,
         }
 
-    def _optimize_beamforming_wmmse_with_snr(
+    def _initial_beamformers(self) -> np.ndarray:
+        """Return deterministic full-power matched-filter reference columns."""
+
+        W = np.zeros((self.M, self.K), dtype=complex)
+        column_power = self.P_max / self.K
+        for k in range(self.K):
+            h_k = self.system.effective_channel(k)
+            channel_norm = np.linalg.norm(h_k)
+            if not np.isfinite(channel_norm) or channel_norm <= 0.0:
+                raise RuntimeError(
+                    f"user {k} has no finite nonzero effective channel"
+                )
+            W[:, k] = np.sqrt(column_power) * h_k / channel_norm
+        return W
+
+    def _feasible_sca_reference(
+        self, sinr_thresholds: np.ndarray
+    ) -> np.ndarray:
+        """Return a fixed-phase reference feasible for every physical QoS.
+
+        The communication-only minimum-power SOCP supplies the reference.  If
+        its complete independent-stream sensing SNR is too small, all columns
+        are scaled by the minimum common factor that meets the sensing target.
+        Common scaling preserves or improves every SINR.  The power budget and
+        all physical constraints are rechecked.  At this accepted reference
+        the affine sensing lower bound is tight, so the subsequent SCA
+        subproblem has a known feasible point without unnecessarily forcing a
+        full-power solution.
+        """
+
+        W_reference, _ = self.bf_optimizer.solve_min_power(
+            sinr_thresholds
+        )
+        reference_snr = self.system.compute_snr_sensing(W_reference)
+        target_snr = self.snr_min * (1.0 + 1e-8)
+        if reference_snr == 0.0:
+            raise RuntimeError(
+                "the communication-feasible SCA reference has zero "
+                "independent-stream sensing power"
+            )
+        if reference_snr < target_snr:
+            required_scale_squared = target_snr / reference_snr
+            reference_power = stable_squared_norm(W_reference)
+            if required_scale_squared > self.P_max / reference_power:
+                raise RuntimeError(
+                    "no power-feasible common scaling of the SCA reference "
+                    "meets the independent-stream sensing-SNR threshold"
+                )
+            W_reference *= np.sqrt(required_scale_squared)
+            self.bf_optimizer._validate_physical_solution(
+                W_reference, sinr_thresholds
+            )
+            reference_snr = self.system.compute_snr_sensing(W_reference)
+        if reference_snr < self.snr_min * (1.0 - 5e-4):
+            raise RuntimeError(
+                "no fixed-phase SCA reference satisfies the "
+                "independent-stream sensing-SNR threshold"
+            )
+        return W_reference
+
+    def _solve_beamforming_socp(
         self,
         sinr_thresholds: np.ndarray,
-        max_wmmse_iter: int = 15,
-    ) -> Tuple[np.ndarray, float]:
-        """Optimize beamforming via WMMSE with SNR sensing constraint.
+        W_reference: np.ndarray,
+    ) -> tuple[np.ndarray, float]:
+        """Find a minimum-power beamformer with SINR and SNR constraints.
 
-        Uses WMMSE alternating optimization with SDR subproblems.
-        SNR constraint is enforced in each SDR step.
+        This educational surrogate uses a conservative SOCP.  Desired-user
+        projections have fixed phase.  For sensing, define
+
+        ``z = h_s^H W`` and ``z_0 = h_s^H W_reference``.
+
+        Convexity of the squared norm gives the global affine lower bound
+
+        ``||z||_2^2 >= 2 Re{z_0^H z} - ||z_0||_2^2``.
+
+        Requiring this lower bound to exceed ``gamma_s sigma^2`` is therefore
+        a convex sufficient condition for the independent-stream covariance
+        constraint ``h_s^H W W^H h_s >= gamma_s sigma^2``.  It contains no
+        coherent sum of the data-stream beamformers.  The reference is the
+        fixed-phase communication-feasible reference and the
+        returned matrix is post-evaluated with the full covariance expression.
 
         Args:
             sinr_thresholds: SINR thresholds (K,).
-            max_wmmse_iter: WMMSE inner iterations.
-
+            W_reference: Previous physical beamforming iterate (M, K).
         Returns:
             Tuple of (W, objective_value).
         """
         H_eff = self.bf_optimizer._get_effective_channels()
         sigma2 = self.system.noise_power
-        h_s = self._compute_sensing_channel().reshape(-1, 1)  # (M, 1)
-
-        # Initialize W
-        W = np.zeros((self.M, self.K), dtype=complex)
+        h_s = self._compute_sensing_channel()
+        thresholds = np.asarray(sinr_thresholds, dtype=float)
+        if (
+            thresholds.shape != (self.K,)
+            or not np.all(np.isfinite(thresholds))
+            or np.any(thresholds < 0)
+        ):
+            raise ValueError(
+                f"sinr_thresholds must be a finite non-negative ({self.K},) vector"
+            )
+        W_reference = np.asarray(W_reference, dtype=complex)
+        if (
+            W_reference.shape != (self.M, self.K)
+            or not np.all(np.isfinite(W_reference))
+        ):
+            raise ValueError(
+                f"W_reference must be a finite {(self.M, self.K)} matrix"
+            )
+        sensing_reference = h_s.conj() @ W_reference
+        sensing_reference_power = stable_squared_norm(sensing_reference)
+        if sensing_reference_power == 0.0:
+            raise RuntimeError(
+                "the sensing linearization reference has zero covariance power"
+            )
+        W_var = cp.Variable((self.M, self.K), complex=True)
+        constraints = [cp.sum_squares(cp.abs(W_var)) <= self.P_max]
         for k in range(self.K):
             h_k = H_eff[k, :]
-            W[:, k] = h_k.conj() / np.linalg.norm(h_k)
-        W *= np.sqrt(self.P_max / self.K) / max(np.linalg.norm(W), 1e-10)
-        W *= np.sqrt(self.P_max) / max(np.linalg.norm(W, "fro"), 1e-10)
+            desired = h_k.conj() @ W_var[:, k]
+            interference = [
+                h_k.conj() @ W_var[:, j]
+                for j in range(self.K)
+                if j != k
+            ]
+            constraints.extend([
+                cp.imag(desired) == 0,
+                cp.real(desired)
+                >= np.sqrt(thresholds[k])
+                * cp.norm(cp.hstack(interference + [np.sqrt(sigma2)]), 2),
+            ])
 
-        best_rate = 0.0
-
-        for wmmse_iter in range(max_wmmse_iter):
-            # Step 1: MMSE receivers and weights
-            u = np.zeros(self.K, dtype=complex)
-            alpha = np.zeros(self.K)
-
-            for k in range(self.K):
-                h_k = H_eff[k, :]
-                denom = sigma2
-                for j in range(self.K):
-                    denom += np.abs(h_k.conj() @ W[:, j]) ** 2
-                u[k] = (h_k.conj() @ W[:, k]) / denom
-                e_k = max(denom - np.abs(h_k.conj() @ W[:, k]) ** 2 * np.abs(u[k]) ** 2, 1e-15)
-                alpha[k] = 1.0 / e_k
-
-            # Step 2: SDR beamforming optimization
-            W_vars = [cp.Variable((self.M, self.M), hermitian=True) for _ in range(self.K)]
-
-            constraints = []
-            for k in range(self.K):
-                constraints.append(W_vars[k] >> 0)
-
-            power_expr = sum(cp.real(cp.trace(W_vars[k])) for k in range(self.K))
-            constraints.append(power_expr <= self.P_max)
-
-            # SINR constraints
-            for k in range(self.K):
-                h_k = H_eff[k, :].reshape(-1, 1)
-                signal = cp.real(cp.conj(h_k).T @ W_vars[k] @ h_k)
-                interf = sigma2
-                for j in range(self.K):
-                    if j != k:
-                        interf += cp.real(cp.conj(h_k).T @ W_vars[j] @ h_k)
-                constraints.append(signal >= sinr_thresholds[k] * interf)
-
-            # SNR sensing constraint: |h_s^H w_total|^2 ≥ γ_min * σ²
-            W_total = sum(W_vars[k] for k in range(self.K))
-            sensing_signal = cp.real(cp.conj(h_s).T @ W_total @ h_s)
-            constraints.append(sensing_signal >= self.snr_min * sigma2)
-
-            # WMMSE objective: minimize Σ_k α_k * e_k (SDR form)
-            wmmse_obj = 0
-            for k in range(self.K):
-                h_k = H_eff[k, :].reshape(-1, 1)
-                uk = u[k]
-                ak = alpha[k]
-
-                # e_k in SDR: |u_k|^2 * Σ_j h_k^H W_j h_k - 2Re(u_k^H h_k^H w_k) + 1
-                # SDR linearizes: Σ_j |u_k|^2 * h_k^H W_j h_k
-                quad = 0
-                for j in range(self.K):
-                    quad += cp.real(cp.conj(h_k).T @ W_vars[j] @ h_k) * np.abs(uk) ** 2
-                wmmse_obj += ak * quad
-
-            prob = cp.Problem(cp.Minimize(wmmse_obj), constraints)
-
-            try:
-                _solve_problem(prob)
-            except RuntimeError:
-                # Fallback: try without SNR constraint
-                constraints_no_snr = constraints[:-1]
-                prob = cp.Problem(cp.Minimize(wmmse_obj), constraints_no_snr)
-                try:
-                    _solve_problem(prob)
-                except RuntimeError:
-                    break
-
-            W_new = self.bf_optimizer._recover_beamformers(W_vars)
-            if np.sum(np.linalg.norm(W_new, axis=0) ** 2) > 1e-10:
-                W = W_new
-
-            rate = self.system.compute_sum_rate(W)
-            if rate > best_rate:
-                best_rate = rate
-
-        return W, best_rate
+        sensing_projection = h_s.conj() @ W_var
+        sensing_lower_bound = (
+            2.0
+            * cp.real(sensing_reference.conj() @ sensing_projection)
+            - sensing_reference_power
+        )
+        constraints.append(
+            sensing_lower_bound >= self.snr_min * sigma2
+        )
+        problem = cp.Problem(
+            cp.Minimize(cp.sum_squares(cp.abs(W_var))), constraints
+        )
+        try:
+            _solve_problem(problem)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "SNR-constrained beamforming subproblem failed; "
+                "the sensing constraint was not relaxed"
+            ) from exc
+        if W_var.value is None:
+            raise RuntimeError("SNR-constrained solver returned no beamformer")
+        W = np.asarray(W_var.value)
+        self.bf_optimizer._validate_physical_solution(W, thresholds)
+        achieved_snr = self.system.compute_snr_sensing(W)
+        if achieved_snr < self.snr_min * (1.0 - 5e-4):
+            raise RuntimeError(
+                "SNR-constrained physical solution is infeasible: "
+                f"{achieved_snr:.6g} < {self.snr_min:.6g}"
+            )
+        return W, stable_squared_norm(W)

@@ -1,391 +1,366 @@
-"""
-Optimization Routines for ISAC Capacity-Distortion Tradeoff.
-
-Implements:
-- Sensing-optimal covariance optimization (Eq. 14)
-- Communication-optimal covariance optimization
-- Covariance shaping for S&C tradeoff (Eq. 48)
-- Stiefel manifold uniform sampling (LQ decomposition method)
-
-References:
-    Xiong et al., IEEE TIT, 2023.
-"""
+"""Deterministic optimizers for the local capacity-distortion surrogate."""
 
 from __future__ import annotations
+
+import math
+
 import numpy as np
-import cvxpy as cp
-from typing import Callable, Optional, Tuple
+
+from .system_model import _noise_normalized_channel, _positive_integer
 
 
-def optimize_sensing_rx(
-    P_T: float,
-    M: int,
-    Hs_func: Optional[Callable] = None,
-    phi_func: Optional[Callable] = None,
-    T: int = 1,
-    sigma_s2: float = 1.0,
-    Jp: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """Find the sensing-optimal covariance matrix.
+Array = np.ndarray
 
-    Solves Eq. (14):
-        min_{Rx} tr{(Phi(Rx))^{-1}}
-        s.t. tr{Rx} = P_T * M,
-             Rx >= 0 (PSD),
-             Rx = Rx^H (Hermitian)
 
-    For angle estimation with ULA, the sensing-optimal Rx is
-    (P_T / M) * I_M (isotropic signaling).
+def _positive_product_ratio(
+    numerators: tuple[float, ...],
+    denominators: tuple[float, ...],
+) -> float:
+    """Evaluate a positive product ratio without overflowing intermediates."""
 
-    Args:
-        P_T (float): Transmit power per symbol.
-        M (int): Number of transmit antennas.
-        Hs_func (callable, optional): Sensing channel function.
-        phi_func (callable, optional): Custom Phi map.
-        T (int): Coherent processing interval.
-        sigma_s2 (float): Sensing noise variance.
-        Jp (np.ndarray, optional): Prior information matrix.
-
-    Returns:
-        np.ndarray: Sensing-optimal covariance Rx, shape (M, M).
-
-    References:
-        Eq. (14) in the paper.
-    """
-    # For the standard case (angle estimation with ULA),
-    # the sensing-optimal Rx is P_T * I (gives tr{Rx} = P_T * M)
-    Rx_opt = P_T * np.eye(M, dtype=np.complex128)
-
-    if phi_func is None:
-        return Rx_opt
-
-    # General case: use convex optimization
-    Rx_var = cp.Variable((M, M), hermitian=True)
-    power = P_T * M
-
-    # Objective: minimize tr{Phi(Rx)^{-1}}
-    # This is convex when Phi is affine and output is PSD
-    # Use the fact that for an affine Phi: tr{X^{-1}} is convex in X
-
-    # Approximation: use tr(Rx^{-1}) as proxy
-    constraints = [
-        cp.trace(Rx_var) == power,
-        Rx_var >> 0,
-    ]
-
+    if any(value == 0 for value in numerators):
+        return 0.0
+    mantissa = 1.0
+    exponent = 0
+    for value in numerators:
+        fraction, power = math.frexp(value)
+        mantissa *= fraction
+        exponent += power
+    for value in denominators:
+        fraction, power = math.frexp(value)
+        mantissa /= fraction
+        exponent -= power
     try:
-        # Use matrix_frac for tr(X^{-1}) - it's convex for X >> 0
-        # matrix_frac(y, X) = y^T X^{-1} y, but we need tr(X^{-1})
-        # For tr(X^{-1}), we use sum of matrix_frac for basis vectors
-        # Or use nuclear norm of inverse via auxiliary variable
-        # Simpler: minimize trace(inv(X)) is equivalent to:
-        # minimize trace(T) s.t. [[T, I], [I, X]] >> 0
-        # But for simplicity, use the analytical solution
-        pass
-    except Exception:
-        pass
-
-    return Rx_opt
+        return math.ldexp(mantissa, exponent)
+    except OverflowError:
+        return float("inf")
 
 
-def optimize_comm_rx(
-    P_T: float,
-    M: int,
-    Hc: np.ndarray,
-) -> np.ndarray:
-    """Find the communication-optimal covariance matrix.
+def _power_budget(
+    power_per_tx: float,
+    transmit_antennas: int,
+) -> tuple[float, float]:
+    """Validate per-antenna power and a representable total trace budget."""
 
-    Solves:
-        max_{Rx} log det(I + sigma_c^{-2} Hc Rx Hc^H)
-        s.t. tr{Rx} = P_T * M,
-             Rx >= 0
+    power = float(power_per_tx)
+    if not np.isfinite(power) or power < 0:
+        raise ValueError("power_per_tx must be non-negative and finite")
+    if power > np.finfo(float).max / transmit_antennas:
+        raise ValueError("the total power budget exceeds the floating-point range")
+    return power, power * transmit_antennas
 
-    The solution uses water-filling over the eigenvalues of
-    Hc^H Hc. For the high-SNR regime with M >= Nc, the optimal
-    Rx allocates power equally across the signal subspace of Hc.
 
-    Args:
-        P_T (float): Transmit power per symbol.
-        M (int): Number of transmit antennas.
-        Hc (np.ndarray): Communication channel matrix, shape (Nc, M).
+def _channel_modes(Hc: Array, sigma_c2: float) -> tuple[Array, Array]:
+    """Return noise-normalized squared singular values and right modes."""
 
-    Returns:
-        np.ndarray: Communication-optimal covariance Rx, shape (M, M).
+    normalized = _noise_normalized_channel(Hc, sigma_c2)
+    _, singular_values, right_vectors_h = np.linalg.svd(
+        normalized,
+        full_matrices=True,
+    )
+    if singular_values.size:
+        square_limit = float(np.sqrt(np.finfo(float).max))
+        if float(np.max(singular_values)) > square_limit:
+            raise ValueError(
+                "the noise-normalized channel energy exceeds the "
+                "floating-point range"
+            )
+    gains = np.zeros(normalized.shape[1], dtype=float)
+    with np.errstate(under="ignore"):
+        gains[: singular_values.size] = singular_values**2
+    return gains, right_vectors_h.conj().T
 
-    References:
-        Related to the capacity-achieving input covariance.
+
+def isotropic_covariance(power_per_tx: float, transmit_antennas: int) -> Array:
+    """Return ``power_per_tx * I`` under the local power convention."""
+
+    antennas = _positive_integer(transmit_antennas, "transmit_antennas")
+    power, _ = _power_budget(power_per_tx, antennas)
+    return power * np.eye(antennas, dtype=np.complex128)
+
+
+def water_filling_covariance(
+    power_per_tx: float,
+    Hc: Array,
+    sigma_c2: float = 1.0,
+) -> Array:
+    """Maximize Gaussian MIMO rate by exact eigenmode water filling.
+
+    The feasible set is ``Rx >= 0`` with
+    ``trace(Rx) = power_per_tx * Hc.shape[1]``.  If ``Hc`` is identically
+    zero, every feasible covariance is optimal and the isotropic covariance is
+    returned deterministically.
     """
-    Hc = np.asarray(Hc, dtype=np.complex128)
-    Nc = Hc.shape[0]
-    power = P_T * M
 
-    # SVD of Hc: Hc = U @ diag(s) @ Vh, Vh has shape (r_eff, M)
-    U, s, Vh = np.linalg.svd(Hc, full_matrices=False)
-    V = Vh.conj().T  # V has shape (M, r_eff) where r_eff = min(Nc, M)
+    channel = np.asarray(Hc, dtype=np.complex128)
+    if channel.ndim != 2 or 0 in channel.shape:
+        raise ValueError("Hc must be a non-empty two-dimensional matrix")
+    if not np.all(np.isfinite(channel)):
+        raise ValueError("Hc must contain only finite values")
+    transmit_antennas = channel.shape[1]
+    per_tx, budget = _power_budget(power_per_tx, transmit_antennas)
+    if budget == 0:
+        return np.zeros((transmit_antennas, transmit_antennas), dtype=np.complex128)
 
-    # Number of non-zero singular values
-    r_eff = len(s)  # = min(Nc, M)
-    r = int(np.sum(s > 1e-10))
+    gains, eigenvectors = _channel_modes(channel, sigma_c2)
+    positive = np.flatnonzero(gains > 0)
+    if positive.size == 0:
+        return isotropic_covariance(per_tx, transmit_antennas)
 
-    if r == 0:
-        return (power / M) * np.eye(M, dtype=np.complex128)
-
-    # Water-filling on eigenvalues of Hc^H Hc
-    eigenvalues = s ** 2  # length r_eff
-    sigma_c2_norm = 1.0  # Normalized noise
-
-    # Sort eigenvalues in descending order
-    sorted_indices = np.argsort(eigenvalues)[::-1]
-    sorted_eigs = eigenvalues[sorted_indices]
-
-    # Standard water-filling: find n_active such that all p_i > 0
-    water_level = power / r  # fallback
-    for n_active in range(r, 0, -1):
-        inv_sum = np.sum(sigma_c2_norm / sorted_eigs[:n_active])
-        mu = (power + inv_sum) / n_active
-        p_test = mu - sigma_c2_norm / sorted_eigs[:n_active]
-        if np.all(p_test > -1e-10):
-            water_level = mu
+    ordered = positive[np.argsort(gains[positive])[::-1]]
+    active_count = 1
+    for candidate in range(2, ordered.size + 1):
+        weakest_gain = gains[ordered[candidate - 1]]
+        stronger_gains = gains[ordered[: candidate - 1]]
+        activation_cost = float(
+            np.sum(1.0 - weakest_gain / stronger_gains)
+        )
+        if activation_cost == 0:
+            active_count = candidate
+            continue
+        if budget <= 1 or weakest_gain <= np.finfo(float).max / budget:
+            with np.errstate(under="ignore"):
+                available = budget * weakest_gain
+        else:
+            available = float("inf")
+        if available > activation_cost:
+            active_count = candidate
+        else:
             break
 
-    # Allocate powers (length r_eff, aligned with V's columns)
-    powers = np.zeros(r_eff)
-    for i in range(r_eff):
-        if s[i] > 1e-10:
-            powers[i] = max(0, water_level - sigma_c2_norm / eigenvalues[i])
-
-    # Enforce power constraint exactly (numerical safety)
-    total_p = np.sum(powers)
-    if total_p > 1e-10:
-        powers = powers * power / total_p
-
-    # Construct Rx = V diag(powers) V^H  (M x M)
-    # powers has length r_eff = min(Nc, M), V has shape (M, r_eff)
-    Rx_opt = V @ np.diag(powers) @ V.conj().T
-
-    # Ensure PSD
-    Rx_opt = (Rx_opt + Rx_opt.conj().T) / 2
-    eigvals, eigvecs = np.linalg.eigh(Rx_opt)
-    eigvals = np.maximum(eigvals, 0)
-    Rx_opt = eigvecs @ np.diag(eigvals) @ eigvecs.conj().T
-
-    return Rx_opt
-
-
-def covariance_shaping(
-    alpha: float,
-    P_T: float,
-    M: int,
-    Hc: np.ndarray,
-    Hs_func: Optional[Callable] = None,
-    phi_func: Optional[Callable] = None,
-    T: int = 1,
-    sigma_c2: float = 1.0,
-    sigma_s2: float = 1.0,
-    Jp: Optional[np.ndarray] = None,
-    Nc: Optional[int] = None,
-) -> np.ndarray:
-    """Solve the covariance shaping optimization (Eq. 48).
-
-    min_{Rx} (1-alpha) * tr{[Phi(Rx)]^{-1}}
-            - alpha * log|I + sigma_c^{-2} Hc Rx Hc^H|
-    s.t. tr{Rx} = P_T * M,
-         Rx >= 0,
-         Rx = Rx^H
-
-    This is the fundamental tradeoff optimization between sensing
-    quality (CRB) and communication rate.
-
-    Args:
-        alpha (float): Tradeoff parameter in [0, 1].
-            alpha=0: pure sensing optimization.
-            alpha=1: pure communication optimization.
-        P_T (float): Transmit power per symbol.
-        M (int): Number of transmit antennas.
-        Hc (np.ndarray): Communication channel, shape (Nc, M).
-        Hs_func (callable, optional): Sensing channel function.
-        phi_func (callable, optional): Custom Phi map.
-        T (int): Coherent processing interval.
-        sigma_c2 (float): Communication noise variance.
-        sigma_s2 (float): Sensing noise variance.
-        Jp (np.ndarray, optional): Prior information.
-        Nc (int, optional): Number of comm Rx antennas.
-
-    Returns:
-        np.ndarray: Optimal covariance Rx, shape (M, M).
-
-    References:
-        Eq. (48) in the paper.
-    """
-    Hc = np.asarray(Hc, dtype=np.complex128)
-    if Nc is None:
-        Nc = Hc.shape[0]
-    power = P_T * M
-
-    # CVXPY formulation
-    Rx_var = cp.Variable((M, M), hermitian=True)
-
-    constraints = [
-        cp.trace(Rx_var) == power,
-        Rx_var >> 0,
-    ]
-
-    # Communication term: -alpha * log|I + Hc Rx Hc^H / sigma_c2|
-    # = -alpha * log_det(I + (1/sigma_c2) * Hc Rx Hc^H)
-    # This is concave in Rx (log_det of affine function)
-
-    if alpha > 1e-10 and alpha < 1 - 1e-10:
-        # Combined objective
-        Gram = Hc @ Rx_var @ Hc.conj().T
-        comm_term = -alpha * cp.log_det(
-            np.eye(Nc, dtype=np.complex128) + Gram / sigma_c2
-        )
-
-        # Sensing term: approximate with -log_det(Rx) (promotes large eigenvalues)
-        # This is a convex surrogate for sensing quality
-        sensing_term = -(1 - alpha) * cp.log_det(Rx_var)
-
-        objective = cp.Minimize(sensing_term + comm_term)
-
-    elif alpha <= 1e-10:
-        # Pure sensing - use isotropic
-        return P_T * np.eye(M, dtype=np.complex128)
+    powers = np.zeros(transmit_antennas, dtype=float)
+    active_modes = ordered[:active_count]
+    active_gains = gains[active_modes]
+    if active_count == 1:
+        powers[active_modes[0]] = budget
+    elif np.all(active_gains == active_gains[0]):
+        powers[active_modes] = budget / active_count
     else:
-        # Pure communication
-        Gram = Hc @ Rx_var @ Hc.conj().T
-        objective = cp.Minimize(
-            -cp.log_det(np.eye(Nc, dtype=np.complex128) + Gram / sigma_c2)
+        gain_scale = active_gains[0]
+        relative_inverse = gain_scale / active_gains
+        correction = (
+            float(np.mean(relative_inverse)) - relative_inverse
+        ) / gain_scale
+        powers[active_modes] = budget / active_count + correction
+        roundoff = (
+            128
+            * np.finfo(float).eps
+            * max(budget, np.finfo(float).tiny)
+        )
+        if float(np.min(powers[active_modes])) < -roundoff:
+            raise RuntimeError("water-filling active-set powers became negative")
+        powers[active_modes] = np.maximum(powers[active_modes], 0.0)
+
+    residual = budget - float(np.sum(powers))
+    powers[active_modes[0]] += residual
+    if powers[active_modes[0]] < 0:
+        raise RuntimeError("water-filling post-correction produced negative power")
+
+    covariance = eigenvectors @ np.diag(powers) @ eigenvectors.conj().T
+    return (covariance + covariance.conj().T) / 2
+
+
+def covariance_shaping_surrogate(
+    alpha: float,
+    power_per_tx: float,
+    Hc: Array,
+    sigma_c2: float = 1.0,
+) -> Array:
+    r"""Solve the repository's explicit log-determinant surrogate.
+
+    For ``0 <= alpha <= 1``, this function minimizes
+
+    .. math::
+
+       -(1-\alpha)\log\det R_X
+       -\alpha\log\det(I + H_cR_XH_c^H/\sigma_c^2)
+
+    over PSD covariances with
+    ``trace(Rx) = power_per_tx * number_of_transmit_antennas``.
+
+    This is *not* the paper's general CRB objective.  It is an internal,
+    strictly defined educational surrogate.  For ``0 < alpha < 1`` its KKT
+    equations are solved in the eigenbasis of ``Hc^H Hc`` by monotone
+    bisection.  The endpoints are the isotropic and water-filling solutions.
+    """
+
+    weight = float(alpha)
+    if not np.isfinite(weight) or not 0 <= weight <= 1:
+        raise ValueError("alpha must be in the closed interval [0, 1]")
+    channel = np.asarray(Hc, dtype=np.complex128)
+    if channel.ndim != 2 or 0 in channel.shape:
+        raise ValueError("Hc must be a non-empty two-dimensional matrix")
+    if not np.all(np.isfinite(channel)):
+        raise ValueError("Hc must contain only finite values")
+    transmit_antennas = channel.shape[1]
+    per_tx, budget = _power_budget(power_per_tx, transmit_antennas)
+
+    if budget == 0 or weight == 0:
+        return isotropic_covariance(per_tx, transmit_antennas)
+    if weight == 1:
+        return water_filling_covariance(per_tx, channel, sigma_c2)
+
+    gains, eigenvectors = _channel_modes(channel, sigma_c2)
+    sensing_weight = 1 - weight
+
+    def powers_at(dual_value: float) -> Array:
+        powers = np.empty(transmit_antennas, dtype=float)
+        null_modes = gains == 0
+        powers[null_modes] = sensing_weight / dual_value
+
+        active = ~null_modes
+        active_gains = gains[active]
+        active_powers = np.empty_like(active_gains)
+
+        # Work with t = budget * gain only through exponent-scaled ratios.
+        # Both t and the usual quadratic discriminant may overflow even when
+        # the KKT power fraction is finite.  Each branch below uses a ratio in
+        # [0, 1] and the second branch is rationalized to avoid cancellation.
+        for index, gain in enumerate(active_gains):
+            gain_to_dual = _positive_product_ratio(
+                (budget, float(gain)),
+                (dual_value,),
+            )
+            if gain_to_dual > 1:
+                dual_to_gain = _positive_product_ratio(
+                    (dual_value,),
+                    (budget, float(gain)),
+                )
+                root = np.sqrt(
+                    (1 - dual_to_gain) ** 2
+                    + 4 * dual_to_gain * sensing_weight
+                )
+                active_powers[index] = (
+                    1 - dual_to_gain + root
+                ) / (2 * dual_value)
+            else:
+                root = np.sqrt(
+                    (1 - gain_to_dual) ** 2
+                    + 4 * gain_to_dual * sensing_weight
+                )
+                active_powers[index] = (
+                    2 * sensing_weight / dual_value
+                ) / (1 - gain_to_dual + root)
+        powers[active] = active_powers
+        return powers
+
+    dual_low = np.finfo(float).tiny
+    dual_high = 1.0
+    while float(np.sum(powers_at(dual_high))) > 1:
+        dual_high *= 2
+        if not np.isfinite(dual_high):
+            raise RuntimeError("failed to bracket the covariance-shaping dual")
+
+    for _ in range(200):
+        dual_mid = (dual_low + dual_high) / 2
+        if float(np.sum(powers_at(dual_mid))) > 1:
+            dual_low = dual_mid
+        else:
+            dual_high = dual_mid
+
+    fractions = powers_at(dual_high)
+    residual = 1 - float(np.sum(fractions))
+    fractions[int(np.argmax(fractions))] += residual
+    if np.any(fractions <= 0):
+        raise RuntimeError("interior surrogate solver returned non-positive power")
+    with np.errstate(under="ignore"):
+        powers = budget * fractions
+    if np.any(powers <= 0):
+        raise ValueError(
+            "the positive interior covariance is below the floating-point range"
         )
 
-    problem = cp.Problem(objective, constraints)
-
-    try:
-        problem.solve(solver=cp.SCS, eps=1e-4, max_iters=2000, verbose=False)
-
-        if problem.status in ["optimal", "optimal_inaccurate"] and Rx_var.value is not None:
-            Rx_opt = np.array(Rx_var.value, dtype=np.complex128)
-            # Ensure numerical PSD
-            Rx_opt = (Rx_opt + Rx_opt.conj().T) / 2
-            eigvals, eigvecs = np.linalg.eigh(Rx_opt)
-            eigvals = np.maximum(eigvals, 1e-12)
-            Rx_opt = eigvecs @ np.diag(eigvals) @ eigvecs.conj().T
-            return Rx_opt
-    except Exception as e:
-        pass
-
-    # Fallback: time-sharing between sensing and comm optima
-    Rx_sense = optimize_sensing_rx(P_T, M, phi_func=phi_func, T=T, sigma_s2=sigma_s2, Jp=Jp)
-    Rx_comm = optimize_comm_rx(P_T, M, Hc)
-    return alpha * Rx_comm + (1 - alpha) * Rx_sense
+    covariance = eigenvectors @ np.diag(powers) @ eigenvectors.conj().T
+    return (covariance + covariance.conj().T) / 2
 
 
-def stiefel_sample(M_sc: int, T: int) -> np.ndarray:
-    """Generate a uniformly distributed semi-unitary matrix.
+def sample_row_semiunitary(
+    rows: int,
+    columns: int,
+    rng: np.random.Generator,
+) -> Array:
+    """Sample a complex row-semiunitary matrix using Gaussian QR."""
 
-    Sample Q from the uniform (Haar) distribution on the Stiefel
-    manifold V_{M_sc}(C^T) = {Q ∈ C^{M_sc × T} : Q Q^H = I_{M_sc}}.
+    row_count = _positive_integer(rows, "rows")
+    column_count = _positive_integer(columns, "columns")
+    if row_count > column_count:
+        raise ValueError("rows cannot exceed columns")
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError("rng must be a numpy.random.Generator")
 
-    Uses the LQ decomposition method:
-    1. Generate A ∈ C^{M_sc × T} with i.i.d. CN(0,1) entries.
-    2. Compute A = L Q via LQ decomposition.
-    3. Q is uniformly distributed on the Stiefel manifold.
-
-    Args:
-        M_sc (int): Number of rows (sensing subspace dimension).
-        T (int): Number of columns (coherent interval).
-
-    Returns:
-        np.ndarray: Semi-unitary matrix Q, shape (M_sc, T),
-            satisfying Q @ Q^H = I_{M_sc}.
-
-    References:
-        Described in Section V-C of the paper for achieving
-        the sensing-optimal point P_sc.
-    """
-    # Step 1: Generate random complex Gaussian matrix
-    A = (
-        np.random.randn(M_sc, T) + 1j * np.random.randn(M_sc, T)
+    gaussian = (
+        rng.standard_normal((column_count, row_count))
+        + 1j * rng.standard_normal((column_count, row_count))
     ) / np.sqrt(2)
+    q_columns, triangular = np.linalg.qr(gaussian, mode="reduced")
 
-    # Step 2: LQ decomposition
-    # scipy doesn't have direct LQ, but we can use QR on A^H
-    # A = L Q => A^H = Q^H L^H => A^H = Q' R' (QR decomp)
-    # Then Q = (Q')^H
-
-    from scipy.linalg import qr
-
-    Ah = A.conj().T  # (T, M_sc)
-    Q_prime, R_prime = qr(Ah, mode="economic")  # Q': (T, M_sc), R': (M_sc, M_sc)
-
-    Q = Q_prime.conj().T  # (M_sc, T)
-
-    # Verify Q is semi-unitary: Q Q^H = I_{M_sc}
-    # (optional, for debugging)
-    # residual = np.linalg.norm(Q @ Q.conj().T - np.eye(M_sc))
-    # assert residual < 1e-10, f"Q not semi-unitary: residual = {residual}"
-
-    return Q
+    diagonal = np.diag(triangular)
+    phases = np.ones_like(diagonal)
+    nonzero = np.abs(diagonal) > 0
+    phases[nonzero] = diagonal[nonzero] / np.abs(diagonal[nonzero])
+    q_columns = q_columns * phases
+    return q_columns.conj().T
 
 
-def generate_isotropic_waveform(
-    P_T: float,
-    M: int,
-    T: int,
-) -> np.ndarray:
-    """Generate an isotropic Gaussian waveform.
+def sample_gaussian_waveform(
+    power_per_tx: float,
+    transmit_antennas: int,
+    interval: int,
+    rng: np.random.Generator,
+) -> Array:
+    """Sample columns independently from ``CN(0, power_per_tx I)``."""
 
-    X with i.i.d. columns ~ CN(0, P_T * I_M).
-
-    Args:
-        P_T (float): Transmit power per symbol.
-        M (int): Number of transmit antennas.
-        T (int): Coherent processing interval.
-
-    Returns:
-        np.ndarray: Waveform matrix X, shape (M, T).
-    """
-    X = (
-        np.random.randn(M, T) + 1j * np.random.randn(M, T)
+    covariance = isotropic_covariance(power_per_tx, transmit_antennas)
+    symbols = _positive_integer(interval, "interval")
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError("rng must be a numpy.random.Generator")
+    standard = (
+        rng.standard_normal((covariance.shape[0], symbols))
+        + 1j * rng.standard_normal((covariance.shape[0], symbols))
     ) / np.sqrt(2)
-    X *= np.sqrt(P_T)
-    return X
+    return np.sqrt(float(power_per_tx)) * standard
 
 
-def generate_semi_unitary_waveform(
-    P_T: float,
-    M_sc: int,
-    M: int,
-    T: int,
-    U: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Generate a semi-unitary waveform for sensing-optimal transmission.
+def make_semiunitary_waveform(
+    power_per_tx: float,
+    transmit_antennas: int,
+    interval: int,
+    rng: np.random.Generator,
+    basis: Array | None = None,
+) -> tuple[Array, Array]:
+    """Construct a waveform with an exactly prescribed isotropic subspace.
 
-    X = sqrt(T * P_T * M / M_sc) * U * Q
-
-    where Q is uniformly sampled from the Stiefel manifold.
-
-    Args:
-        P_T (float): Transmit power per symbol.
-        M_sc (int): Sensing subspace dimension.
-        M (int): Total number of Tx antennas.
-        T (int): Coherent interval.
-        U (np.ndarray, optional): Orthonormal basis for sensing
-            subspace, shape (M, M_sc).
-
-    Returns:
-        Tuple of (X, Q) where X is the waveform and Q is the
-        Stiefel matrix.
+    If ``basis`` has ``r`` orthonormal columns, the returned sample covariance
+    is ``(power_per_tx * M / r) basis basis^H`` and its trace is
+    ``power_per_tx * M``.
     """
-    # Sample Q from Stiefel manifold
-    Q = stiefel_sample(M_sc, T)
 
-    if U is None:
-        U = np.eye(M, M_sc, dtype=np.complex128)
+    antennas = _positive_integer(transmit_antennas, "transmit_antennas")
+    symbols = _positive_integer(interval, "interval")
+    power = float(power_per_tx)
+    if not np.isfinite(power) or power < 0:
+        raise ValueError("power_per_tx must be non-negative and finite")
 
-    # Construct waveform: tr{(1/T) X X^H} = P_T * M
-    # (1/T) * scale^2 * U U^H = P_T * M * (U U^H)
-    # scale^2 = P_T * M * T
-    scale = np.sqrt(P_T * M * T / M_sc)
-    X = scale * U @ Q
+    if basis is None:
+        rank = min(antennas, symbols)
+        subspace = np.eye(antennas, rank, dtype=np.complex128)
+    else:
+        subspace = np.asarray(basis, dtype=np.complex128)
+        if subspace.ndim != 2 or subspace.shape[0] != antennas:
+            raise ValueError("basis must have one row per transmit antenna")
+        rank = subspace.shape[1]
+        if rank < 1 or rank > min(antennas, symbols):
+            raise ValueError("basis rank must lie between one and min(M, T)")
+        if not np.all(np.isfinite(subspace)):
+            raise ValueError("basis must contain only finite values")
+        if not np.allclose(
+            subspace.conj().T @ subspace,
+            np.eye(rank),
+            rtol=1e-12,
+            atol=1e-12,
+        ):
+            raise ValueError("basis columns must be orthonormal")
 
-    return X, Q
+    q_rows = sample_row_semiunitary(rank, symbols, rng)
+    scale = np.sqrt(symbols * power * antennas / rank)
+    return scale * subspace @ q_rows, q_rows

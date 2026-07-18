@@ -1,0 +1,106 @@
+---
+schema_version: 1
+baseline: ris_isac_beamforming
+reference:
+  doi: 10.1109/TWC.2023.3341429
+evidence_level: educational-surrogate
+paper_figure_parity: false
+model: >-
+  Local narrowband RIS-assisted communication and sensing-SNR feasibility
+  surrogate with independent unit-variance data streams, conservative
+  fixed-phase sensing constraints, monotone unit-modulus coordinate updates,
+  and direct post-evaluation.
+assumptions:
+  - Channel geometry and normalization are local and synthetic.
+  - Beamforming columns multiply independent zero-mean unit-variance symbols;
+    sensing power is sum_k |h_s^H w_k|^2 and contains no cross-stream terms.
+  - Rate uses log1p for every representable finite nonnegative SINR.
+  - Direct and reflected paths are accumulated exactly as signed binary terms.
+  - The fixed-phase SOCP enforces the first-order global affine lower bound of
+    ||h_s^H W||_2^2 at a communication-feasible reference minimally scaled, if
+    needed, to pass sensing and power checks; it contains no coherent stream sum.
+  - The RIS sensing step exactly maximizes each phase coordinate and retains
+    it only after a non-decreasing physical-SNR post-check;
+    no multi-stream global phase optimum is claimed.
+  - Communication SINR and sensing SNR remain scale normalized until a
+    representable output is formed.
+  - Common channel scaling preserves phase while the final SNR remains
+    representable.
+parameters:
+  seed: 20260717
+  base_station_antennas: 4
+  communication_users: 2
+  ris_elements: 12
+  sensing_snr_threshold_db: 5.0
+  independent_stream_counterexample: M=1,K=2,h_s=1,noise=1
+  common_channel_scale_regression: 1.0e-20
+  low_sinr_regression: 1.0e-20
+  balanced_signal_and_interference_projection: 1.0e200
+  cancellation_large_path: 1.0e280
+  cancellation_residual_path: 1.0e-60
+  extreme_triangle_projection: 1.0e200
+oracle:
+  type: stream-statistics-monotonicity-and-physical-postconditions
+  expected:
+    opposite_unit_streams_sensing_snr: 2.0
+    equal_unit_streams_sensing_snr: 2.0
+    affine_covariance_lower_bound_identity: true
+    phase_update_is_nondecreasing: true
+    phase_vector_is_scale_invariant: true
+    sub_epsilon_sinr_rate_is_positive: true
+    equal_1e200_signal_and_interference_have_unit_sinr: true
+    340_decade_path_cancellation_preserves_tail: true
+    triangle_oracle_with_1e200_terms_is_finite: true
+    all_returned_constraints_hold: true
+    accepted_power_history_is_nonincreasing: true
+tolerances:
+  physical_constraints_relative: 5.0e-4
+  accepted_power_increase_relative: 1.0e-8
+  low_scale_power_covariance_relative: 5.0e-13
+  phase_vector_absolute: 2.0e-14
+  sub_epsilon_snr_rate_relative: 5.0e-16
+  cross_scale_cancellation_relative: 2.0e-15
+  extreme_triangle_relative: 3.0e-15
+evidence:
+  command: >-
+    python -m
+    code.baselines.ris_isac_beamforming.examples.verify_surrogate --json
+  certificate_checks:
+    - affine_covariance_lower_bound_identity
+    - balanced_extreme_signal_interference_ratio
+    - communication_sinr_constraints
+    - cross_scale_path_cancellation_tail
+    - independent_stream_power_counterexample
+    - iteration_terminated
+    - low_scale_phase_update_nondecreasing
+    - phase_power_covariance_at_1e_minus_20_scale
+    - phase_solution_common_scale_invariant
+    - phase_update_nondecreasing
+    - power_constraint
+    - power_history_nonincreasing
+    - sensing_snr_constraint
+    - single_stream_triangle_oracle_is_scale_safe
+    - sub_epsilon_snr_rate_preserved
+    - unit_modulus
+  checks:
+    - W=[1,-1] and W=[1,1] both yield sensing SNR 2 for h_s=1 and unit noise
+    - affine SCA lower bound differs from covariance power by
+      ||h_s^H(W-W_0)||_2^2 and meets the sensing threshold
+    - non-decreasing physical streamwise-SNR phase update
+    - squared-magnitude SNR covariance at a 1.0e-20 common channel scale
+    - phase-vector invariance under common channel scaling
+    - log1p rate oracle at SINR 1.0e-20
+    - unit SINR and two-bit sum-rate oracle with 1.0e200 projections
+    - exact direct/RIS path cancellation leaving a 1.0e-60 projection tail
+    - triangle-inequality SNR oracle with individually unrepresentable powers
+    - direct physical post-evaluation of every returned constraint
+    - nonincreasing accepted transmit-power sequence
+limitations:
+  - The paper two-angle nuisance-parameter CRB is not implemented.
+  - The artifact does not reproduce the paper algorithm or figures.
+  - A positive final metric outside binary64 raises an explicit range error.
+  - The affine sensing lower bound is sufficient, not necessary, and can reject
+    feasible independent-stream beamformers when the reference is poorly aligned.
+  - Multi-stream RIS coordinate ascent is locally monotone, not jointly globally
+    optimal.
+  - The exact metric reference path prioritizes auditability over production speed.

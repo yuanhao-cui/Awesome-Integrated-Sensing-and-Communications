@@ -6,8 +6,8 @@ import numpy as np
 
 import sys
 sys.path.insert(0, "..")
-from src.trainer import Trainer
-from src.model import BeamTrainingNet
+from ..src.trainer import Trainer
+from ..src.model import BeamTrainingNet
 
 
 class TestTrainer:
@@ -57,6 +57,19 @@ class TestTrainer:
         assert targets.shape[1] == 256, f"Target shape: {targets.shape}"
         assert snr.shape[1] == 1, f"SNR shape: {snr.shape}"
 
+    def test_seeded_data_loaders_are_reproducible(self, config):
+        first = Trainer(config, device="cpu")
+        second = Trainer(config, device="cpu")
+        first_batch = next(iter(first.load_data()[0]))
+        second_batch = next(iter(second.load_data()[0]))
+        for left, right in zip(first_batch, second_batch):
+            torch.testing.assert_close(left, right, rtol=0, atol=0)
+
+    def test_single_sample_split_is_rejected(self, config):
+        config = {**config, "num_synthetic_samples": 1}
+        with pytest.raises(ValueError, match="at least two"):
+            Trainer(config).load_data()
+
     def test_training_step(self, config):
         """Test that a single training step runs and reduces initial loss."""
         trainer = Trainer(config, device="cpu")
@@ -69,6 +82,23 @@ class TestTrainer:
         assert "val_loss" in history
         assert len(history["train_loss"]) == 2
         assert len(history["val_loss"]) == 2
+
+    def test_nondefault_antenna_count_trains_end_to_end(self, config, tmp_path):
+        """The trainer must pass the configured array size into the rate loss."""
+        small_config = {
+            **config,
+            "num_antennas": 64,
+            "batch_size": 8,
+            "num_synthetic_samples": 20,
+            "init_features": 2,
+            "checkpoint_dir": str(tmp_path),
+        }
+        trainer = Trainer(small_config, device="cpu")
+        trainer.setup_model()
+        trainer.load_data()
+        history = trainer.train(num_epochs=1)
+        assert len(history["train_loss"]) == 1
+        assert np.isfinite(history["train_loss"][0])
 
     def test_checkpoint_saving(self, config):
         """Test that checkpoints are saved."""

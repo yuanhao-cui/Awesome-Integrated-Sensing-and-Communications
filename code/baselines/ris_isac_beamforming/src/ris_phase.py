@@ -1,201 +1,208 @@
-"""RIS phase shift optimization.
+"""Deterministic unit-modulus phase updates for the local RIS surrogate."""
 
-Optimizes the passive RIS reflection coefficients θ to maximize
-communication and sensing performance.
-
-Reference: Section IV.B, AO for RIS in
-    Rang Liu et al., IEEE TWC 2024, arXiv:2301.11134.
-"""
+from __future__ import annotations
 
 import numpy as np
-import cvxpy as cp
-from typing import Optional, Tuple
 
+from .numerics import sensing_coordinate_phase_candidate
 from .system_model import RIS_ISAC_System
-
-_SOLVER_PREF = [cp.MOSEK, cp.SCS]
-
-
-def _solve_problem(prob: cp.Problem) -> float:
-    """Solve CVXPY problem with solver fallback."""
-    for solver in _SOLVER_PREF:
-        try:
-            prob.solve(solver=solver, verbose=False)
-            if prob.status in ("optimal", "optimal_inaccurate"):
-                return prob.value
-        except (cp.error.SolverError, ImportError):
-            continue
-    raise RuntimeError(f"All solvers failed. Status: {prob.status}")
 
 
 class RISPhaseOptimizer:
-    """RIS phase shift optimization under unit-modulus constraint.
-
-    For fixed beamforming W, optimizes θ to maximize sum rate
-    or satisfy sensing constraints.
-
-    Unit-modulus constraint: |θ_l| = 1, ∀l ∈ {1,...,L}.
-    """
+    """Coordinate phase updates with physical-objective monotonicity checks."""
 
     def __init__(self, system: RIS_ISAC_System):
-        """Initialize RIS phase optimizer.
-
-        Args:
-            system: The RIS-ISAC system model.
-        """
         self.system = system
-        self.M = system.M
-        self.K = system.K
         self.L = system.L
 
-    def optimize_for_rate(self, W: np.ndarray) -> np.ndarray:
-        """Optimize RIS phases to maximize sum rate for fixed beamforming.
-
-        Uses SCA (Successive Convex Approximation) to handle the
-        non-convex unit-modulus constraint. Each θ_l is written as
-        θ_l = e^{jφ_l} and φ_l is optimized.
-
-        Simplified approach: coordinate ascent over phase angles.
-
-        Args:
-            W: Fixed beamforming matrix (M, K).
-
-        Returns:
-            Optimized RIS phase vector (L,) with |θ_l| = 1.
-        """
-        H_BR = self.system.channels["H_BR"]  # (L, M)
-        G = self.system.channels["G"]  # (K, L)
-        h_d = self.system.channels["h_d"]  # (K, M)
-        sigma2 = self.system.noise_power
-
-        # Coordinate ascent over RIS phases
+    def _coordinate_ascent(
+        self,
+        objective,
+        candidates_per_element: int,
+        max_sweeps: int,
+        tolerance: float = 1e-12,
+    ) -> np.ndarray:
+        if candidates_per_element < 2 or max_sweeps < 1:
+            raise ValueError("grid size and max_sweeps must be positive")
         theta = self.system.theta.copy()
-        current_rate = self.system.compute_sum_rate(W)
+        self.system.set_ris_phases(theta)
+        current = float(objective())
+        if not np.isfinite(current):
+            raise RuntimeError("initial RIS objective is not finite")
+        grid = np.exp(
+            1j
+            * np.linspace(
+                0.0,
+                2.0 * np.pi,
+                candidates_per_element,
+                endpoint=False,
+            )
+        )
 
-        for _ in range(50):  # inner iterations
-            improved = False
-            for l in range(self.L):
-                # Grid search over phase for element l
-                best_phase = theta[l]
-                best_rate = current_rate
-
-                # Coarse grid
-                candidates = np.exp(1j * np.linspace(0, 2 * np.pi, 16, endpoint=False))
-                for phi_cand in candidates:
-                    theta[l] = phi_cand
-                    self.system.theta = theta.copy()
-                    rate = self.system.compute_sum_rate(W)
-                    if rate > best_rate:
-                        best_rate = rate
-                        best_phase = phi_cand
-                        improved = True
-
-                theta[l] = best_phase
-
-            self.system.theta = theta
-            current_rate = best_rate
-            if not improved:
+        for _ in range(max_sweeps):
+            sweep_start = current
+            for element in range(self.L):
+                best_phase = theta[element]
+                best_value = current
+                for candidate in grid:
+                    trial = theta.copy()
+                    trial[element] = candidate
+                    self.system.set_ris_phases(trial)
+                    value = float(objective())
+                    improvement_scale = max(
+                        abs(value),
+                        abs(best_value),
+                        np.nextafter(0.0, 1.0),
+                    )
+                    if value > best_value + tolerance * improvement_scale:
+                        best_value = value
+                        best_phase = candidate
+                theta[element] = best_phase
+                self.system.set_ris_phases(theta)
+                current = best_value
+            sweep_scale = max(
+                abs(current),
+                abs(sweep_start),
+                np.nextafter(0.0, 1.0),
+            )
+            if current <= sweep_start + tolerance * sweep_scale:
                 break
 
+        self.system.set_ris_phases(theta)
+        final = float(objective())
+        final_scale = max(
+            abs(final), abs(current), np.nextafter(0.0, 1.0)
+        )
+        if final + tolerance * final_scale < current:
+            raise RuntimeError("RIS coordinate update failed its monotonicity check")
+        return theta.copy()
+
+    def optimize_for_rate(
+        self,
+        W: np.ndarray,
+        candidates_per_element: int = 16,
+        max_sweeps: int = 50,
+    ) -> np.ndarray:
+        """Monotonically increase the local surrogate's sum rate."""
+
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.system.M, self.system.K):
+            raise ValueError(
+                f"W must have shape {(self.system.M, self.system.K)}"
+            )
+        before = self.system.compute_sum_rate(W)
+        theta = self._coordinate_ascent(
+            lambda: self.system.compute_sum_rate(W),
+            candidates_per_element,
+            max_sweeps,
+        )
+        after = self.system.compute_sum_rate(W)
+        if after + 1e-10 < before:
+            raise RuntimeError("rate-oriented RIS update decreased sum rate")
         return theta
 
     def optimize_for_snr(
-        self, W: np.ndarray, target_snr_dB: float
-    ) -> Tuple[np.ndarray, float]:
-        """Optimize RIS phases to maximize radar sensing SNR.
+        self,
+        W: np.ndarray,
+        max_sweeps: int = 20,
+        tolerance: float = 1e-12,
+    ) -> tuple[np.ndarray, float]:
+        """Monotonically improve independent-stream sensing power.
 
-        For fixed communication beamforming W, optimize θ to
-        satisfy SNR_sensing ≥ γ_min.
+        The objective is
 
-        SNR_s = |a_s^H θ|^2 / σ² where a_s is a composite sensing vector.
+        ``sum_k |h_s(theta)^H w_k|^2 / sigma^2``.
 
-        Args:
-            W: Fixed beamforming matrix (M, K).
-            target_snr_dB: Target sensing SNR in dB.
-
-        Returns:
-            Tuple of (theta, achieved_snr_linear).
+        A single phase generally cannot align the reflected terms of every
+        independent stream simultaneously, so no joint global optimum is
+        claimed.  Holding all other phases fixed reduces one coordinate to
+        ``2 Re{conj(theta_l) C_l}``; its exact maximizer is the phase of the
+        cross-stream coefficient ``C_l``.  Each candidate is post-evaluated
+        with the physical streamwise SNR and rolled back if binary64 phase
+        rounding would decrease it.  Thus every accepted coordinate and the
+        complete update are non-decreasing.
         """
-        H_BR = self.system.channels["H_BR"]
-        a_bs = self.system.channels["a_bs"]
-        a_ris = self.system.channels["a_ris"]
 
-        w_total = np.sum(W, axis=1)  # total beamforming (M,)
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.system.M, self.system.K):
+            raise ValueError(
+                f"W must have shape {(self.system.M, self.system.K)}"
+            )
+        if not isinstance(max_sweeps, (int, np.integer)) or max_sweeps < 1:
+            raise ValueError("max_sweeps must be a positive integer")
+        if not np.isfinite(tolerance) or tolerance <= 0.0:
+            raise ValueError("tolerance must be positive and finite")
+        before = self.system.compute_snr_sensing(W)
+        current = before
+        theta = self.system.theta.copy()
+        for _ in range(max_sweeps):
+            sweep_start = current
+            for element in range(self.L):
+                candidate = sensing_coordinate_phase_candidate(
+                    self.system.channels["a_bs"],
+                    self.system.channels["a_ris"],
+                    self.system.channels["H_BR"],
+                    W,
+                    theta,
+                    element,
+                )
+                trial = theta.copy()
+                trial[element] = candidate
+                self.system.set_ris_phases(trial)
+                value = self.system.compute_snr_sensing(W)
+                if value >= current:
+                    theta = self.system.theta.copy()
+                    current = value
+                else:
+                    self.system.set_ris_phases(theta)
+            scale = max(
+                abs(current),
+                abs(sweep_start),
+                np.nextafter(0.0, 1.0),
+            )
+            if current <= sweep_start + tolerance * scale:
+                break
 
-        # The sensing SNR through RIS:
-        # h_s = a_bs + diag(a_ris) H_BR w / ||w|| (normalized)
-        # SNR = |h_s^H w|^2 / σ²
-        # Effective: a_s[l] = a_ris[l] * (H_BR[l,:] @ w_total)
-        a_s = a_ris * (H_BR @ w_total)  # (L,) composite sensing vector
-        a_s = a_s / (np.linalg.norm(a_s) + 1e-15)
-
-        # Maximize |a_s^H θ|² subject to |θ_l| = 1
-        # Optimal: θ_l = e^{j * arg(a_s[l])}
-        theta = np.exp(1j * np.angle(a_s.conj()))
-
-        self.system.theta = theta
-        achieved_snr = self.system.compute_snr_sensing(w_total)
-
-        return theta, achieved_snr
+        self.system.set_ris_phases(theta)
+        achieved = self.system.compute_snr_sensing(W)
+        if achieved < before:
+            raise RuntimeError("sensing-oriented RIS update decreased SNR")
+        return self.system.theta.copy(), achieved
 
     def optimize_joint(
         self,
         W: np.ndarray,
         sensing_weight: float = 0.5,
+        candidates_per_element: int = 12,
+        max_sweeps: int = 30,
     ) -> np.ndarray:
-        """Joint optimization of RIS phases for both communication and sensing.
+        """Increase a declared normalized rate/SNR scalarization.
 
-        Weighted objective: α * rate + (1-α) * sensing_snr.
-
-        Uses grid-based coordinate ascent.
-
-        Args:
-            W: Fixed beamforming matrix (M, K).
-            sensing_weight: Weight for sensing vs communication (0 to 1).
-
-        Returns:
-            Optimized RIS phase vector (L,).
+        Raw rate and SNR have incompatible units and scales.  Each term is
+        therefore normalized by its value at the input phases before applying
+        the user-supplied dimensionless weight.
         """
-        H_BR = self.system.channels["H_BR"]
-        G = self.system.channels["G"]
-        h_d = self.system.channels["h_d"]
-        a_bs = self.system.channels["a_bs"]
-        a_ris = self.system.channels["a_ris"]
-        sigma2 = self.system.noise_power
 
-        w_total = np.sum(W, axis=1)
-        a_s = a_ris * (H_BR @ w_total)
+        if not 0.0 <= sensing_weight <= 1.0:
+            raise ValueError("sensing_weight must lie in [0, 1]")
+        W = np.asarray(W, dtype=complex)
+        if W.shape != (self.system.M, self.system.K):
+            raise ValueError(
+                f"W must have shape {(self.system.M, self.system.K)}"
+            )
+        rate_scale = max(self.system.compute_sum_rate(W), 1e-15)
+        snr_scale = max(self.system.compute_snr_sensing(W), 1e-15)
 
-        theta = self.system.theta.copy()
+        def objective() -> float:
+            rate = self.system.compute_sum_rate(W) / rate_scale
+            snr = self.system.compute_snr_sensing(W) / snr_scale
+            return (1.0 - sensing_weight) * rate + sensing_weight * snr
 
-        def compute_objective(th):
-            self.system.theta = th
-            rate = self.system.compute_sum_rate(W)
-            snr = self.system.compute_snr_sensing(w_total)
-            return (1 - sensing_weight) * rate + sensing_weight * snr
+        return self._coordinate_ascent(
+            objective,
+            candidates_per_element,
+            max_sweeps,
+        )
 
-        current_obj = compute_objective(theta)
 
-        for _ in range(30):
-            improved = False
-            for l in range(self.L):
-                candidates = np.exp(1j * np.linspace(0, 2 * np.pi, 12, endpoint=False))
-                best_obj = current_obj
-                best_phase = theta[l]
-
-                for phi_cand in candidates:
-                    theta[l] = phi_cand
-                    obj = compute_objective(theta)
-                    if obj > best_obj:
-                        best_obj = obj
-                        best_phase = phi_cand
-                        improved = True
-
-                theta[l] = best_phase
-
-            self.system.theta = theta
-            current_obj = best_obj
-            if not improved:
-                break
-
-        return theta
+__all__ = ["RISPhaseOptimizer"]

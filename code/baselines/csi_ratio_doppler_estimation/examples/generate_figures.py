@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-Generate simulation figures for P0-B: CSI-Ratio-based Doppler Estimation.
+Generate synthetic diagnostic figures for the checked CSI-ratio estimator.
 
 Produces four publication-quality figures using synthetic CSI data:
   - B1: CSI-ratio circle in the complex plane
-  - B2: Doppler estimation comparison (3 algorithms vs ground truth)
-  - B3: Estimation error vs SNR
+  - B2: circle-phase estimate over sliding windows
+  - B3: circle-phase estimation error vs SNR
   - B4: CSI-ratio trajectory with circle fitting visualization
 """
 
-import sys
 import os
-
-# Add src/ to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+import sys
 
 import numpy as np
 import matplotlib
@@ -21,14 +18,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle as CirclePatch
-from matplotlib.lines import Line2D
 
-from signal_model import csi_with_doppler
-from csi_ratio import compute_csi_ratio
-from mobius_estimator import mobius_doppler_estimate
-from periodicity_estimator import periodicity_doppler_estimate
-from difference_estimator import difference_doppler_estimate
-from circle_fit import least_squares_circle_fit
+BASELINE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, BASELINE_DIR)
+
+from src.circle_fit import least_squares_circle_fit  # noqa: E402
+from src.csi_ratio import compute_csi_ratio  # noqa: E402
+from src.mobius_estimator import mobius_doppler_estimate  # noqa: E402
+from src.signal_model import csi_with_doppler  # noqa: E402
 
 # ── Global style ──────────────────────────────────────────────────────────────
 plt.rcParams.update(
@@ -64,6 +61,7 @@ def generate_csi(f_D=50.0, fs=2000.0, duration=0.5, snr_db=np.inf, seed=42):
         phase_offset=np.pi / 6,
         cfo_hz=50.0,
         tmo_hz=10.0,
+        rng=rng,
     )
     R = compute_csi_ratio(H1, H2)
     return t, H1, H2, R
@@ -78,8 +76,6 @@ def figure_b1():
     t, H1, H2, R = generate_csi(f_D=50.0, snr_db=40.0)
 
     A, B, r = least_squares_circle_fit(R)
-    C_0 = A + 1j * B
-
     fig, ax = plt.subplots(figsize=(7, 7))
 
     # Colour-coded by time
@@ -94,7 +90,14 @@ def figure_b1():
         (A, B), r, fill=False, edgecolor="#E53935", lw=2, ls="--", label="Fitted circle"
     )
     ax.add_patch(circle)
-    ax.plot(A, B, "rx", ms=12, mew=3, label=f"Center ({A:.3f}, {B:.3f})j")
+    ax.plot(
+        A,
+        B,
+        "rx",
+        ms=12,
+        mew=3,
+        label=f"Center {A:.3f} {B:+.3f}j",
+    )
 
     # Unit circle for reference
     theta_circ = np.linspace(0, 2 * np.pi, 200)
@@ -110,7 +113,10 @@ def figure_b1():
 
     ax.set_xlabel("Real")
     ax.set_ylabel("Imaginary")
-    ax.set_title("B1 — CSI-Ratio in Complex Plane  ($f_D=50$ Hz, SNR=40 dB)")
+    ax.set_title(
+        "B1 — Synthetic Pure-Rotation CSI Ratio  "
+        "($f_D=50$ Hz, SNR=40 dB)"
+    )
     ax.set_aspect("equal")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="upper right")
@@ -122,11 +128,11 @@ def figure_b1():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Figure B2: Doppler Estimation Comparison over Time
+# Figure B2: Sliding-window rotation estimate
 # ══════════════════════════════════════════════════════════════════════════════
 def figure_b2():
-    """Run all 3 algorithms on a sliding window and plot estimates vs true."""
-    print("  Generating Figure B2 (estimation comparison)...")
+    """Plot the circle-phase estimate for deterministic sliding windows."""
+    print("  Generating Figure B2 (windowed circle-phase estimate)...")
     f_D_true = 50.0
     fs = 2000.0
     duration = 1.0
@@ -139,7 +145,7 @@ def figure_b2():
     t, H1, H2, R = generate_csi(f_D=f_D_true, fs=fs, duration=duration, snr_db=snr_db)
     T_s = 1.0 / fs
 
-    t_centers, mobius_ests, peri_ests, diff_ests = [], [], [], []
+    t_centers, mobius_ests = [], []
     for start in range(0, len(R) - window_N + 1, step_N):
         R_w = R[start : start + window_N]
         t_w = t[start : start + window_N]
@@ -148,24 +154,23 @@ def figure_b2():
         m = mobius_doppler_estimate(R_w, T_s)
         mobius_ests.append(m["f_D"])
 
-        p = periodicity_doppler_estimate(R_w, T_s)
-        peri_ests.append(p["f_D"])
-
-        d = difference_doppler_estimate(R_w, T_s)
-        diff_ests.append(d["f_D"])
-
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.axhline(
         f_D_true, color="k", ls="--", lw=1.5, label=f"True $f_D$ = {f_D_true} Hz"
     )
-    ax.plot(t_centers, mobius_ests, "o-", ms=4, color="#1976D2", label="Mobius (Alg 1)")
-    ax.plot(t_centers, peri_ests, "s-", ms=4, color="#388E3C", label="Periodicity (Alg 2)")
-    ax.plot(t_centers, diff_ests, "^-", ms=4, color="#F57C00", label="Difference (Alg 3)")
+    ax.plot(
+        t_centers,
+        mobius_ests,
+        "o-",
+        ms=4,
+        color="#1976D2",
+        label="Checked circle-phase estimator",
+    )
 
     ax.set_xlabel("Window center time (ms)")
     ax.set_ylabel("Estimated $f_D$ (Hz)")
     ax.set_title(
-        "B2 — Doppler Estimation Comparison  "
+        "B2 — Synthetic Windowed Circle-Phase Diagnostic  "
         f"($f_D$={f_D_true} Hz, SNR={snr_db} dB, {window_ms} ms window)"
     )
     ax.grid(True, alpha=0.3)
@@ -181,7 +186,7 @@ def figure_b2():
 # Figure B3: Estimation Error vs SNR
 # ══════════════════════════════════════════════════════════════════════════════
 def figure_b3():
-    """Sweep SNR and report absolute error for each algorithm."""
+    """Sweep SNR and report the circle-phase adapter's absolute error."""
     print("  Generating Figure B3 (error vs SNR)...")
     f_D_true = 50.0
     fs = 2000.0
@@ -189,43 +194,75 @@ def figure_b3():
     snr_range = np.arange(0, 45, 3)  # 0–42 dB
     n_trials = 20
 
-    mobius_err = np.zeros(len(snr_range))
-    peri_err = np.zeros(len(snr_range))
-    diff_err = np.zeros(len(snr_range))
+    median_error = np.zeros(len(snr_range))
+    lower_quartile = np.zeros(len(snr_range))
+    upper_quartile = np.zeros(len(snr_range))
+    valid_fraction = np.zeros(len(snr_range))
 
     for i_snr, snr_db in enumerate(snr_range):
-        m_errs, p_errs, d_errs = [], [], []
+        m_errs = []
         for trial in range(n_trials):
             t, H1, H2, R = generate_csi(
                 f_D=f_D_true, fs=fs, duration=duration, snr_db=snr_db, seed=trial * 100 + 7
             )
             T_s = 1.0 / fs
-            m = mobius_doppler_estimate(R, T_s)
-            m_errs.append(abs(abs(m["f_D"]) - f_D_true))
-            p = periodicity_doppler_estimate(R, T_s)
-            p_errs.append(abs(p["f_D"] - f_D_true))
-            d = difference_doppler_estimate(R, T_s)
-            d_errs.append(abs(d["f_D"] - f_D_true))
-        mobius_err[i_snr] = np.median(m_errs)
-        peri_err[i_snr] = np.median(p_errs)
-        diff_err[i_snr] = np.median(d_errs)
+            try:
+                estimate = mobius_doppler_estimate(R, T_s)
+            except ValueError:
+                continue
+            m_errs.append(abs(abs(estimate["f_D"]) - f_D_true))
+        valid_fraction[i_snr] = len(m_errs) / n_trials
+        if m_errs:
+            (
+                lower_quartile[i_snr],
+                median_error[i_snr],
+                upper_quartile[i_snr],
+            ) = np.quantile(m_errs, [0.25, 0.5, 0.75])
+        else:
+            lower_quartile[i_snr] = np.nan
+            median_error[i_snr] = np.nan
+            upper_quartile[i_snr] = np.nan
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
     ax.semilogy(
-        snr_range, mobius_err, "o-", ms=5, color="#1976D2", label="Mobius (Alg 1)"
+        snr_range,
+        median_error,
+        "o-",
+        ms=5,
+        color="#1976D2",
+        label="Median absolute error",
     )
-    ax.semilogy(
-        snr_range, peri_err, "s-", ms=5, color="#388E3C", label="Periodicity (Alg 2)"
-    )
-    ax.semilogy(
-        snr_range, diff_err, "^-", ms=5, color="#F57C00", label="Difference (Alg 3)"
+    ax.fill_between(
+        snr_range,
+        lower_quartile,
+        upper_quartile,
+        color="#1976D2",
+        alpha=0.2,
+        label="Interquartile range",
     )
 
     ax.set_xlabel("SNR (dB)")
     ax.set_ylabel(r"Median |$\hat{f}_D - f_D$| (Hz)")
-    ax.set_title("B3 — Estimation Error vs SNR  ($f_D=50$ Hz, 20 trials)")
+    validity_axis = ax.twinx()
+    validity_axis.plot(
+        snr_range,
+        valid_fraction,
+        "s--",
+        ms=4,
+        color="#616161",
+        label="Accepted-trial fraction",
+    )
+    validity_axis.set_ylabel("Accepted-trial fraction")
+    validity_axis.set_ylim(-0.03, 1.03)
+
+    ax.set_title(
+        "B3 — Synthetic Pure-Rotation Error Diagnostic  "
+        "($f_D=50$ Hz, 20 fixed seeds)"
+    )
     ax.grid(True, which="both", alpha=0.3)
-    ax.legend(loc="upper right")
+    handles, labels = ax.get_legend_handles_labels()
+    handles_valid, labels_valid = validity_axis.get_legend_handles_labels()
+    ax.legend(handles + handles_valid, labels + labels_valid, loc="upper right")
 
     path = os.path.join(RESULTS_DIR, "B3_error_vs_snr.png")
     fig.savefig(path)
@@ -281,15 +318,6 @@ def figure_b4():
     # ── Right: Shifted to origin ──
     sc2 = ax2.scatter(
         np.real(R_shifted),
-        np.real(R_shifted) * 0 + np.imag(R_shifted),
-        c=t * 1000,
-        cmap="plasma",
-        s=10,
-        alpha=0.85,
-        zorder=5,
-    )
-    ax2.scatter(
-        np.real(R_shifted),
         np.imag(R_shifted),
         c=t * 1000,
         cmap="plasma",
@@ -328,7 +356,7 @@ def figure_b4():
     ax2.legend(fontsize=9)
 
     fig.suptitle(
-        "B4 — CSI-Ratio Trajectory & Circle Fitting  ($f_D=50$ Hz)",
+        "B4 — Synthetic CSI-Ratio Trajectory & Circle Fit  ($f_D=50$ Hz)",
         fontsize=15,
         y=1.01,
     )
@@ -344,7 +372,7 @@ def figure_b4():
 # Main
 # ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    print("P0-B: Generating simulation figures...")
+    print("Generating local synthetic diagnostic figures...")
     figure_b1()
     figure_b2()
     figure_b3()

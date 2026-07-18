@@ -1,316 +1,276 @@
-"""
-Localization QoS for ISAC Resource Allocation.
+"""Dimensionally explicit local information-bound localization proxy."""
 
-Implements Cramér-Rao Bound based localization metrics from "Sensing as a Service in 6G Perceptive Networks"
-(Eq. 22-31).
-"""
+from typing import Optional, Tuple
 
 import numpy as np
-from typing import Optional, Tuple
-from dataclasses import dataclass
 
 from .system_model import ISACSystem
 
 
-@dataclass
-class CRBResults:
-    """Cramér-Rao Bound results for a target."""
-    crb_range: float      # CRB for range estimation
-    crb_angle: float      # CRB for angle estimation
-    crb_combined: float   # Combined CRB (weighted sum)
-
-
 class LocalizationQoS:
+    """Evaluate a declared synthetic range/angle information model.
+
+    This class is not an implementation of a paper-specific likelihood.  The
+    range proxy uses allocated bandwidth, whereas the angle proxy uses a fixed
+    noise-equivalent reference bandwidth.  Consequently, angle information is
+    independent of allocated bandwidth.  This is an explicit local modeling
+    choice and is not presented as a paper-equation implementation.
     """
-    Localization Quality of Service (Eq. 22-31).
-    
-    Implements CRB-based localization metrics with range and angle estimation
-    performance bounds.
-    """
-    
-    def __init__(self, system: ISACSystem, w_d: float = 1.0, w_theta: float = 1.0):
-        """
-        Initialize Localization QoS.
-        
-        Parameters
-        ----------
-        system : ISACSystem
-            ISAC system model
-        w_d : float
-            Weight for range estimation (default: 1.0)
-        w_theta : float
-            Weight for angle estimation (default: 1.0)
-        """
+
+    def __init__(
+        self,
+        system: ISACSystem,
+        w_d: float = 1.0,
+        w_theta: float = 1.0,
+        range_reference_m: float = 1.0,
+        angle_reference_rad: float = 1.0e-3,
+        angle_noise_bandwidth_hz: float = 10.0e6,
+        d_lambda: float = 0.5,
+    ):
+        """Initialize the local proxy and its dimensionless score scales."""
         self.system = system
-        self.w_d = w_d
-        self.w_theta = w_theta
-        self.c = 3e8  # Speed of light
-        
+        self.w_d = self._nonnegative_finite("w_d", w_d)
+        self.w_theta = self._nonnegative_finite("w_theta", w_theta)
+        if self.w_d == 0.0 and self.w_theta == 0.0:
+            raise ValueError("at least one localization weight must be positive")
+        self.range_reference_m = self._positive_finite(
+            "range_reference_m", range_reference_m
+        )
+        self.angle_reference_rad = self._positive_finite(
+            "angle_reference_rad", angle_reference_rad
+        )
+        self.angle_noise_bandwidth_hz = self._positive_finite(
+            "angle_noise_bandwidth_hz", angle_noise_bandwidth_hz
+        )
+        self.d_lambda = self._positive_finite("d_lambda", d_lambda)
+        for name, value in (
+            ("range_reference_m", self.range_reference_m),
+            ("angle_reference_rad", self.angle_reference_rad),
+            ("d_lambda", self.d_lambda),
+        ):
+            with np.errstate(over="ignore", invalid="ignore"):
+                squared = np.square(np.float64(value))
+            if not np.isfinite(squared):
+                raise ValueError(f"{name} squared must be finite")
+        self.c = 3.0e8
+
+    @staticmethod
+    def _positive_finite(name: str, value: float) -> float:
+        """Return a validated positive scalar."""
+        value = float(value)
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be positive and finite")
+        return value
+
+    @staticmethod
+    def _nonnegative_finite(name: str, value: float) -> float:
+        """Return a validated non-negative scalar."""
+        value = float(value)
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError(f"{name} must be non-negative and finite")
+        return value
+
+    def _validate_resources(
+        self, p: np.ndarray, b: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Validate per-target power and allocated-bandwidth vectors."""
+        p = np.asarray(p, dtype=float)
+        b = np.asarray(b, dtype=float)
+        expected = (self.system.params.Q,)
+        if p.shape != expected or b.shape != expected:
+            raise ValueError(f"p and b must have shape {expected}")
+        if not np.all(np.isfinite(p)) or not np.all(np.isfinite(b)):
+            raise ValueError("p and b must contain only finite values")
+        if np.any(p < 0.0) or np.any(b <= 0.0):
+            raise ValueError("power must be non-negative and bandwidth positive")
+        return p, b
+
+    def _validate_angles(self, angles: Optional[np.ndarray]) -> np.ndarray:
+        """Return a validated angle vector, defaulting to the system geometry."""
+        if angles is None:
+            angles = self.system.target_angles
+        angles = np.asarray(angles, dtype=float)
+        expected = (self.system.params.Q,)
+        if angles.shape != expected or not np.all(np.isfinite(angles)):
+            raise ValueError(f"angles must be finite with shape {expected}")
+        return angles
+
+    def compute_information_components(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        d_lambda: Optional[float] = None,
+        *,
+        angles: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return range information in 1/m^2 and angle information in 1/rad^2.
+
+        The local assumptions are
+
+        ``J_d = 8 pi^2 SNR_alloc b^2 / c^2`` with
+        ``SNR_alloc = p g / (N0 b)``, and
+
+        ``J_theta = SNR_angle Nt(Nt^2-1) pi^2 cos^2(theta) d^2 / 6``
+        with ``SNR_angle = p g / (N0 B_angle_ref)``.
+
+        ``B_angle_ref`` is fixed at construction, so changing an allocation's
+        bandwidth does not silently change the assumed angle-noise model.
+        """
+        p, b = self._validate_resources(p, b)
+        angles = self._validate_angles(angles)
+        spacing = self.d_lambda if d_lambda is None else self._positive_finite(
+            "d_lambda", d_lambda
+        )
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            gain = self.system.beta_sensing * self.system.rcs
+            allocated_snr = p * gain / (self.system.N0 * b)
+            range_information = (
+                8.0 * np.pi**2 * allocated_snr * np.square(b) / self.c**2
+            )
+
+            angle_snr = p * gain / (
+                self.system.N0 * self.angle_noise_bandwidth_hz
+            )
+            nt = self.system.params.Nt
+            angle_information = (
+                angle_snr
+                * nt
+                * (nt**2 - 1)
+                * np.pi**2
+                * np.square(np.cos(angles))
+                * np.square(np.float64(spacing))
+                / 6.0
+            )
+        if not (
+            np.all(np.isfinite(range_information))
+            and np.all(np.isfinite(angle_information))
+        ):
+            raise ValueError(
+                "localization information is outside the finite numerical domain"
+            )
+        return range_information, angle_information
+
+    @staticmethod
+    def _reciprocal_bound(information: np.ndarray) -> np.ndarray:
+        """Invert positive information and map zero information to infinity."""
+        bound = np.full_like(information, np.inf, dtype=float)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            np.divide(1.0, information, out=bound, where=information > 0.0)
+        return bound
+
     def compute_crb_range(self, p: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Return the local range-variance lower-bound proxy in square metres."""
+        range_information, _ = self.compute_information_components(p, b)
+        return self._reciprocal_bound(range_information)
+
+    def compute_crb_angle(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        d_lambda: Optional[float] = None,
+        *,
+        angles: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Return the local angle-variance proxy in square radians.
+
+        The allocated-bandwidth vector is validated for API consistency, but
+        the angle model uses the fixed ``angle_noise_bandwidth_hz`` declared at
+        construction and is therefore allocation-bandwidth invariant.
         """
-        Compute CRB for range estimation (Eq. 22).
-        
-        CRB(d_q) ∝ 1 / (p_q * |s_q|² * b_q)
-        
-        More precisely:
-        CRB(d_q) = c² / (8π² * SNR_q * b_q²)
-        
-        where SNR_q = (p_q * β_q * σ_q) / (N0 * b_q)
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation for sensing targets (Q,)
-        b : np.ndarray
-            Bandwidth allocation for sensing targets (Q,)
-            
-        Returns
-        -------
-        crb_range : np.ndarray
-            CRB for range estimation (Q,)
-        """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        snr = self.system.compute_sensing_snr(p, b)
-        
-        # CRB(d) = c² / (8π² * SNR * B²)
-        crb = (self.c**2) / (8 * np.pi**2 * snr * b**2)
-        
-        return crb
-    
-    def compute_crb_angle(self, p: np.ndarray, b: np.ndarray,
-                          d_lambda: float = 0.5) -> np.ndarray:
-        """
-        Compute CRB for angle estimation (Eq. 29-31).
-        
-        CRB(θ_q) ∝ 1 / (p_q * |s_q|²)
-        
-        More precisely:
-        CRB(θ_q) = 6 / (SNR_q * Nt * (Nt² - 1) * π² * cos²(θ_q))
-        
-        Note: Angle CRB depends on SNR which includes bandwidth, but the
-        fundamental limit is set by the power and antenna array configuration.
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        d_lambda : float
-            Antenna spacing in wavelengths (default: 0.5)
-            
-        Returns
-        -------
-        crb_angle : np.ndarray
-            CRB for angle estimation (Q,)
-        """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        # SNR for sensing: SNR = (p * β * σ) / (N0 * b)
-        snr = self.system.compute_sensing_snr(p, b)
-        Nt = self.system.params.Nt
-        angles = self.system.target_angles
-        
-        # CRB(θ) = 6 / (SNR * Nt * (Nt² - 1) * π² * cos²(θ) * d_λ²)
-        crb = 6 / (snr * Nt * (Nt**2 - 1) * np.pi**2 * 
-                   np.cos(angles)**2 * d_lambda**2)
-        
-        return crb
-    
+        _, angle_information = self.compute_information_components(
+            p, b, d_lambda=d_lambda, angles=angles
+        )
+        return self._reciprocal_bound(angle_information)
+
+    def compute_information_score(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        *,
+        angles: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Return a dimensionless weighted range/angle information score."""
+        range_information, angle_information = self.compute_information_components(
+            p, b, angles=angles
+        )
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            score = (
+                self.w_d
+                * np.square(np.float64(self.range_reference_m))
+                * range_information
+                + self.w_theta
+                * np.square(np.float64(self.angle_reference_rad))
+                * angle_information
+            )
+        if not np.all(np.isfinite(score)):
+            raise ValueError(
+                "localization score is outside the finite numerical domain"
+            )
+        return score
+
+    def compute_information_score_coefficients(self, b: np.ndarray) -> np.ndarray:
+        """Return exact score-per-watt coefficients for fixed bandwidth."""
+        b = np.asarray(b, dtype=float)
+        ones = np.ones(self.system.params.Q, dtype=float)
+        return self.compute_information_score(ones, b)
+
     def compute_crb_combined(self, p: np.ndarray, b: np.ndarray) -> np.ndarray:
-        """
-        Compute combined CRB for localization (Eq. 22, 29-31).
-        
-        ρ_q = w_d / CRB(d_q) + w_θ / CRB(θ_q)
-        
-        This is the inverse-weighted sum of individual CRBs.
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-            
-        Returns
-        -------
-        crb_combined : np.ndarray
-            Combined CRB metric (Q,)
-        """
-        crb_d = self.compute_crb_range(p, b)
-        crb_theta = self.compute_crb_angle(p, b)
-        
-        # ρ_q = w_d / CRB(d_q) + w_θ / CRB(θ_q)
-        rho = self.w_d / crb_d + self.w_theta / crb_theta
-        
-        return rho
-    
-    def compute_localization_rmse(self, p: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Compute root mean square error (RMSE) bounds for localization.
-        
-        RMSE(d_q) = √CRB(d_q)
-        RMSE(θ_q) = √CRB(θ_q)
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-            
-        Returns
-        -------
-        rmse_range : np.ndarray
-            RMSE for range estimation (Q,)
-        rmse_angle : np.ndarray
-            RMSE for angle estimation (Q,)
-        """
-        crb_d = self.compute_crb_range(p, b)
-        crb_theta = self.compute_crb_angle(p, b)
-        
-        return np.sqrt(crb_d), np.sqrt(crb_theta)
-    
+        """Compatibility wrapper returning the dimensionless information score."""
+        return self.compute_information_score(p, b)
+
+    def compute_localization_rmse(
+        self, p: np.ndarray, b: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return range and angle RMSE lower-bound proxies."""
+        return np.sqrt(self.compute_crb_range(p, b)), np.sqrt(
+            self.compute_crb_angle(p, b)
+        )
+
     def compute_objective_sum(self, p: np.ndarray, b: np.ndarray) -> float:
-        """
-        Compute sum objective for localization QoS (Eq. 31).
-        
-        max Σ_q ρ_q
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-            
-        Returns
-        -------
-        objective : float
-            Sum of combined CRB metrics
-        """
-        rho = self.compute_crb_combined(p, b)
-        return np.sum(rho)
-    
-    def compute_objective_proportional_fairness(self, p: np.ndarray, b: np.ndarray) -> float:
-        """
-        Compute proportional fairness objective for localization (Eq. 31).
-        
-        max Σ_q log(ρ_q)
-        
-        This ensures proportional fairness among targets.
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-            
-        Returns
-        -------
-        objective : float
-            Proportional fairness metric
-        """
-        rho = self.compute_crb_combined(p, b)
-        # Proportional fairness: sum of log
-        return np.sum(np.log(rho + 1e-10))
-    
+        """Return the sum of dimensionless information scores."""
+        return float(np.sum(self.compute_information_score(p, b)))
+
+    def compute_objective_proportional_fairness(
+        self, p: np.ndarray, b: np.ndarray
+    ) -> float:
+        """Return a log-score diagnostic with a dimensionless argument."""
+        score = self.compute_information_score(p, b)
+        return float(np.sum(np.log(np.maximum(score, np.finfo(float).tiny))))
+
     def compute_objective_maxmin(self, p: np.ndarray, b: np.ndarray) -> float:
-        """
-        Compute max-min fairness objective for localization.
-        
-        max min_q ρ_q
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-            
-        Returns
-        -------
-        objective : float
-            Minimum combined CRB metric
-        """
-        rho = self.compute_crb_combined(p, b)
-        return np.min(rho)
-    
+        """Return the minimum dimensionless information score."""
+        return float(np.min(self.compute_information_score(p, b)))
+
     def compute_fim(self, p: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Construct the declared diagonal local information matrices.
+
+        These matrices collect the two proxy-information components.  They are
+        not presented as raw or expected Hessians of an unspecified likelihood.
         """
-        Compute Fisher Information Matrix (FIM) for target parameters.
-        
-        FIM(q) = [F_dd, F_dθ; F_θd, F_θθ]
-        
-        where:
-        - F_dd = ∂²lnL/∂d²
-        - F_θθ = ∂²lnL/∂θ²
-        - F_dθ = ∂²lnL/∂d∂θ
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-            
-        Returns
-        -------
-        fim : np.ndarray
-            Fisher Information Matrices (Q, 2, 2)
-        """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        Q = self.system.params.Q
-        Nt = self.system.params.Nt
-        snr = self.system.compute_sensing_snr(p, b)
-        angles = self.system.target_angles
-        
-        fim = np.zeros((Q, 2, 2))
-        
-        for q in range(Q):
-            # F_dd = 8π² B² SNR / c²
-            F_dd = 8 * np.pi**2 * b[q]**2 * snr[q] / self.c**2
-            
-            # F_θθ = SNR * Nt * (Nt² - 1) * π² * cos²(θ) * d_λ² / 3
-            F_theta_theta = snr[q] * Nt * (Nt**2 - 1) * np.pi**2 * \
-                           np.cos(angles[q])**2 / 3
-            
-            # Off-diagonal term (coupling between range and angle)
-            F_d_theta = 0  # Simplified: assume decoupled
-            
-            fim[q] = [[F_dd, F_d_theta], [F_d_theta, F_theta_theta]]
-        
+        range_information, angle_information = self.compute_information_components(
+            p, b
+        )
+        fim = np.zeros((self.system.params.Q, 2, 2), dtype=float)
+        fim[:, 0, 0] = range_information
+        fim[:, 1, 1] = angle_information
         return fim
-    
-    def validate_localization_performance(self, p: np.ndarray, b: np.ndarray,
-                                          max_range_error: float = 1.0,
-                                          max_angle_error: float = 0.1) -> bool:
-        """
-        Validate that localization performance meets requirements.
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        max_range_error : float
-            Maximum allowed range RMSE (meters)
-        max_angle_error : float
-            Maximum allowed angle RMSE (radians)
-            
-        Returns
-        -------
-        valid : bool
-            True if performance requirements are met
-        """
+
+    def validate_localization_performance(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        max_range_error: float = 1.0,
+        max_angle_error: float = 0.1,
+    ) -> bool:
+        """Check declared RMSE limits in metres and radians."""
+        max_range_error = self._positive_finite(
+            "max_range_error", max_range_error
+        )
+        max_angle_error = self._positive_finite(
+            "max_angle_error", max_angle_error
+        )
         rmse_range, rmse_angle = self.compute_localization_rmse(p, b)
-        
-        return (np.all(rmse_range <= max_range_error) and 
-                np.all(rmse_angle <= max_angle_error))
+        return bool(
+            np.all(rmse_range <= max_range_error)
+            and np.all(rmse_angle <= max_angle_error)
+        )

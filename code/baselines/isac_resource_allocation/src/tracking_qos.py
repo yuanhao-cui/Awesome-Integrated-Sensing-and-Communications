@@ -1,420 +1,376 @@
-"""
-Tracking QoS for ISAC Resource Allocation.
+"""Auditable constant-velocity covariance-bound tracking surrogate."""
 
-Implements Posterior Cramér-Rao Bound (PCRB) based tracking metrics from
-"Sensing as a Service in 6G Perceptive Networks" (Eq. 44-47).
-"""
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import numpy as np
-from typing import Optional, Tuple, List
-from dataclasses import dataclass
 
+from .localization_qos import LocalizationQoS
 from .system_model import ISACSystem
 
 
 @dataclass
 class TargetState:
-    """State of a tracking target."""
-    position: np.ndarray  # [x, y] or [x, y, z]
-    velocity: np.ndarray  # [vx, vy] or [vx, vy, vz]
-    acceleration: Optional[np.ndarray] = None
+    """Synthetic Cartesian position and velocity state."""
+
+    position: np.ndarray
+    velocity: np.ndarray
 
 
 class TrackingQoS:
+    """Constant-velocity prediction and range/angle covariance update.
+
+    Only the trace of the 2x2 position block is used as a scalar objective.
+    A full-state trace would add square metres to square metres per square
+    second and is therefore intentionally not exposed as a QoS score.
     """
-    Tracking Quality of Service (Eq. 44-47).
-    
-    Implements Posterior Cramér-Rao Bound (PCRB) for sequential tracking
-    using Extended Kalman Filter (EKF) framework.
-    """
-    
-    def __init__(self, system: ISACSystem, dt: float = 0.1,
-                 process_noise_std: float = 0.5,
-                 measurement_noise_std: float = 0.1):
-        """
-        Initialize Tracking QoS.
-        
-        Parameters
-        ----------
-        system : ISACSystem
-            ISAC system model
-        dt : float
-            Time step for tracking (seconds)
-        process_noise_std : float
-            Standard deviation of process noise
-        measurement_noise_std : float
-            Standard deviation of measurement noise
-        """
+
+    def __init__(
+        self,
+        system: ISACSystem,
+        dt: float = 0.1,
+        process_noise_std: float = 0.5,
+        localization_qos: Optional[LocalizationQoS] = None,
+    ):
+        """Initialize the motion model and shared measurement proxy."""
         self.system = system
-        self.dt = dt
-        self.process_noise_std = process_noise_std
-        self.measurement_noise_std = measurement_noise_std
-        
-        # Initialize target states
+        if not np.isfinite(dt) or dt <= 0.0:
+            raise ValueError("dt must be positive and finite")
+        if not np.isfinite(process_noise_std) or process_noise_std < 0.0:
+            raise ValueError("process_noise_std must be non-negative and finite")
+        self.dt = float(dt)
+        self.process_noise_std = float(process_noise_std)
+        self.localization_qos = localization_qos or LocalizationQoS(system)
+        if self.localization_qos.system is not system:
+            raise ValueError("localization_qos must use the same ISACSystem")
+        # Reject finite parameters that cannot form a finite covariance in the
+        # active floating-point domain, rather than failing during a later step.
+        self._get_process_noise_cov()
         self.target_states = self._initialize_target_states()
-        
+
     def _initialize_target_states(self) -> List[TargetState]:
-        """Initialize target states from system model."""
+        """Initialize seeded Cartesian target states from system geometry."""
         states = []
-        Q = self.system.params.Q
-        
-        for q in range(Q):
-            # Convert polar to Cartesian
-            d = self.system.target_positions[q]
-            theta = self.system.target_angles[q]
-            
-            x = d * np.cos(theta)
-            y = d * np.sin(theta)
-            
-            # Random initial velocity
-            vx = np.random.uniform(-10, 10)
-            vy = np.random.uniform(-10, 10)
-            
-            states.append(TargetState(
-                position=np.array([x, y]),
-                velocity=np.array([vx, vy])
-            ))
-        
+        for target_index in range(self.system.params.Q):
+            distance = self.system.target_positions[target_index]
+            angle = self.system.target_angles[target_index]
+            position = np.array(
+                [distance * np.cos(angle), distance * np.sin(angle)]
+            )
+            velocity = self.system.rng.uniform(-10.0, 10.0, size=2)
+            states.append(TargetState(position=position, velocity=velocity))
         return states
-    
+
     def _get_transition_matrix(self) -> np.ndarray:
-        """
-        Get state transition matrix for constant velocity model.
-        
-        F = [1, 0, dt, 0;
-             0, 1, 0, dt;
-             0, 0, 1,  0;
-             0, 0, 0,  1]
-        """
+        """Return the Cartesian constant-velocity transition matrix."""
         dt = self.dt
-        return np.array([
-            [1, 0, dt, 0],
-            [0, 1, 0, dt],
-            [0, 0, 1,  0],
-            [0, 0, 0,  1]
-        ])
-    
+        return np.array(
+            [
+                [1.0, 0.0, dt, 0.0],
+                [0.0, 1.0, 0.0, dt],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+
     def _get_process_noise_cov(self) -> np.ndarray:
-        """
-        Get process noise covariance matrix.
-        
-        Q = σ_p² * [dt⁴/4, 0,     dt³/2, 0;
-                    0,     dt⁴/4, 0,     dt³/2;
-                    dt³/2, 0,     dt²,   0;
-                    0,     dt³/2, 0,     dt²]
-        """
-        dt = self.dt
-        sigma = self.process_noise_std
-        
-        return sigma**2 * np.array([
-            [dt**4/4, 0,       dt**3/2, 0],
-            [0,       dt**4/4, 0,       dt**3/2],
-            [dt**3/2, 0,       dt**2,   0],
-            [0,       dt**3/2, 0,       dt**2]
-        ])
-    
-    def _compute_measurement_jacobian(self, state: np.ndarray) -> np.ndarray:
-        """
-        Compute measurement Jacobian H.
-        
-        For polar measurements [range, angle]:
-        H = [x/r, y/r, 0, 0;
-             -y/r², x/r², 0, 0]
-        """
-        x, y = state[0], state[1]
-        r = np.sqrt(x**2 + y**2)
-        
-        if r < 1e-10:
-            r = 1e-10
-        
-        return np.array([
-            [x/r,   y/r,   0, 0],
-            [-y/r**2, x/r**2, 0, 0]
-        ])
-    
-    def compute_fim(self, p: np.ndarray, b: np.ndarray,
-                    state_idx: int = 0) -> np.ndarray:
-        """
-        Compute Fisher Information Matrix for tracking.
-        
-        J(x) = J_prior + J_likelihood
-        
-        where:
-        - J_prior = (F * J_{k-1}^{-1} * F^T + Q)^{-1}
-        - J_likelihood = H^T * R^{-1} * H
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        state_idx : int
-            Target index for tracking
-            
-        Returns
-        -------
-        fim : np.ndarray
-            Fisher Information Matrix (4, 4)
-        """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        F = self._get_transition_matrix()
-        Q_proc = self._get_process_noise_cov()
-        
-        # Get target state
+        """Return ``sigma_a^2 G G^T`` for interval-constant acceleration."""
+        if self.process_noise_std == 0.0:
+            return np.zeros((4, 4), dtype=float)
+        dt = np.float64(self.dt)
+        sigma = np.float64(self.process_noise_std)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            half_dt_squared = 0.5 * np.square(dt)
+            acceleration_map = np.array(
+                [
+                    [half_dt_squared, 0.0],
+                    [0.0, half_dt_squared],
+                    [dt, 0.0],
+                    [0.0, dt],
+                ]
+            )
+            scaled_map = sigma * acceleration_map
+            covariance = scaled_map @ scaled_map.T
+        if not np.all(np.isfinite(covariance)):
+            raise ValueError(
+                "dt and process_noise_std must yield a finite process covariance"
+            )
+        return covariance
+
+    @staticmethod
+    def _compute_measurement_jacobian(state: np.ndarray) -> np.ndarray:
+        """Return the range/azimuth Jacobian at a nonzero Cartesian state."""
+        state = np.asarray(state, dtype=float)
+        if state.shape != (4,) or not np.all(np.isfinite(state)):
+            raise ValueError("state must be a finite four-vector")
+        x_coord, y_coord = state[:2]
+        radius = float(np.hypot(x_coord, y_coord))
+        if not np.isfinite(radius):
+            raise ValueError("state radius is outside the finite numerical domain")
+        if radius <= 1.0e-10:
+            raise ValueError("range/angle Jacobian is undefined at the origin")
+        inverse_radius = 1.0 / radius
+        inverse_radius_squared = inverse_radius**2
+        return np.array(
+            [
+                [x_coord * inverse_radius, y_coord * inverse_radius, 0.0, 0.0],
+                [
+                    -y_coord * inverse_radius_squared,
+                    x_coord * inverse_radius_squared,
+                    0.0,
+                    0.0,
+                ],
+            ]
+        )
+
+    def _validate_resources(
+        self, p: np.ndarray, b: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Validate per-target power and allocated-bandwidth vectors."""
+        p = np.asarray(p, dtype=float)
+        b = np.asarray(b, dtype=float)
+        expected = (self.system.params.Q,)
+        if p.shape != expected or b.shape != expected:
+            raise ValueError(f"p and b must have shape {expected}")
+        if not np.all(np.isfinite(p)) or not np.all(np.isfinite(b)):
+            raise ValueError("p and b must contain only finite values")
+        if np.any(p < 0.0) or np.any(b <= 0.0):
+            raise ValueError("power must be non-negative and bandwidth positive")
+        return p, b
+
+    def _compute_measurement_covariance(
+        self,
+        power: float,
+        bandwidth: float,
+        target_index: int,
+        angle: float,
+    ) -> np.ndarray:
+        """Return the same range/angle variance proxies as localization."""
+        if not isinstance(target_index, (int, np.integer)) or not (
+            0 <= target_index < self.system.params.Q
+        ):
+            raise IndexError("target_index is outside the sensing-target range")
+        if not np.isfinite(power) or power <= 0.0:
+            raise ValueError("power must be positive and finite")
+        if not np.isfinite(bandwidth) or bandwidth <= 0.0:
+            raise ValueError("bandwidth must be positive and finite")
+        if not np.isfinite(angle):
+            raise ValueError("angle must be finite")
+
+        p_vector = np.zeros(self.system.params.Q, dtype=float)
+        b_vector = np.ones(self.system.params.Q, dtype=float)
+        angle_vector = np.asarray(self.system.target_angles, dtype=float).copy()
+        p_vector[target_index] = power
+        b_vector[target_index] = bandwidth
+        angle_vector[target_index] = angle
+        range_bound = self.localization_qos.compute_crb_range(
+            p_vector, b_vector
+        )[target_index]
+        angle_bound = self.localization_qos.compute_crb_angle(
+            p_vector, b_vector, angles=angle_vector
+        )[target_index]
+        covariance = np.diag([range_bound, angle_bound])
+        if not np.all(np.isfinite(covariance)) or np.any(
+            np.diag(covariance) <= 0.0
+        ):
+            raise RuntimeError("measurement covariance must be finite and positive")
+        return covariance
+
+    def compute_fim(
+        self, p: np.ndarray, b: np.ndarray, state_idx: int = 0
+    ) -> np.ndarray:
+        """Return predicted-epoch measurement information for one target."""
+        p, b = self._validate_resources(p, b)
+        if not isinstance(state_idx, (int, np.integer)) or not (
+            0 <= state_idx < self.system.params.Q
+        ):
+            raise IndexError("state_idx is outside the sensing-target range")
+        if p[state_idx] == 0.0:
+            return np.zeros((4, 4), dtype=float)
         state = self.target_states[state_idx]
-        state_vec = np.array([state.position[0], state.position[1],
-                             state.velocity[0], state.velocity[1]])
-        
-        # Measurement Jacobian
-        H = self._compute_measurement_jacobian(state_vec)
-        
-        # Measurement noise covariance (depends on SNR)
-        snr = self.system.compute_sensing_snr(p[state_idx], b[state_idx])
-        R = self._compute_measurement_covariance(snr)
-        
-        # FIM for likelihood
-        J_likelihood = H.T @ np.linalg.inv(R) @ H
-        
-        return J_likelihood
-    
-    def _compute_measurement_covariance(self, snr: float) -> np.ndarray:
+        state_vector = np.concatenate([state.position, state.velocity])
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            predicted_state = self._get_transition_matrix() @ state_vector
+        if not np.all(np.isfinite(predicted_state)):
+            raise ValueError("predicted target state is outside the finite domain")
+        jacobian = self._compute_measurement_jacobian(predicted_state)
+        angle = float(np.arctan2(predicted_state[1], predicted_state[0]))
+        covariance = self._compute_measurement_covariance(
+            p[state_idx], b[state_idx], state_idx, angle
+        )
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            information = jacobian.T @ np.linalg.solve(covariance, jacobian)
+        if not np.all(np.isfinite(information)):
+            raise ValueError(
+                "tracking measurement information is outside the finite domain"
+            )
+        return information
+
+    @staticmethod
+    def _validate_prior(prior: np.ndarray, target_count: int) -> np.ndarray:
+        """Validate a batch of symmetric positive-definite prior covariances."""
+        prior = np.asarray(prior, dtype=float)
+        expected = (target_count, 4, 4)
+        if prior.shape != expected or not np.all(np.isfinite(prior)):
+            raise ValueError(f"prior_pcrb must be finite with shape {expected}")
+        if not np.allclose(prior, np.swapaxes(prior, 1, 2), rtol=0.0, atol=1e-12):
+            raise ValueError("each prior_pcrb matrix must be symmetric")
+        if any(np.min(np.linalg.eigvalsh(matrix)) <= 0.0 for matrix in prior):
+            raise ValueError("each prior_pcrb matrix must be positive definite")
+        return prior
+
+    def compute_pcrb(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        prior_pcrb: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Perform one same-epoch covariance prediction/measurement update.
+
+        The covariance and the target state are both predicted with ``F`` before
+        the measurement Jacobian is evaluated.  The posterior uses the Joseph
+        covariance form, avoiding an explicit inverse of the predicted
+        covariance or posterior information matrix.
         """
-        Compute measurement noise covariance based on SNR.
-        
-        R = diag(σ_r², σ_θ²)
-        where:
-        - σ_r² = c² / (8π² SNR B²)
-        - σ_θ² = 6 / (SNR Nt (Nt² - 1) π² cos²θ)
-        """
-        c = 3e8
-        Nt = self.system.params.Nt
-        
-        # Range variance
-        sigma_r_sq = c**2 / (8 * np.pi**2 * snr * self.system.params.B_total**2)
-        
-        # Angle variance (simplified)
-        sigma_theta_sq = 6 / (snr * Nt * (Nt**2 - 1) * np.pi**2)
-        
-        return np.diag([sigma_r_sq, sigma_theta_sq])
-    
-    def compute_pcrb(self, p: np.ndarray, b: np.ndarray,
-                     prior_pcrb: Optional[np.ndarray] = None) -> np.ndarray:
-        """
-        Compute Posterior Cramér-Rao Bound (Eq. 44).
-        
-        PCRB_k = (F * PCRB_{k-1}^{-1} * F^T + Q)^{-1} + H^T * R^{-1} * H
-        
-        This is the recursive PCRB computation.
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        prior_pcrb : np.ndarray, optional
-            PCRB from previous time step (4, 4). If None, uses identity.
-            
-        Returns
-        -------
-        pcrb : np.ndarray
-            Posterior CRB for each target (Q, 4, 4)
-        """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        Q = self.system.params.Q
-        F = self._get_transition_matrix()
-        Q_proc = self._get_process_noise_cov()
-        
-        pcrb = np.zeros((Q, 4, 4))
-        
-        for q in range(Q):
-            # Prior PCRB (or large initial uncertainty)
-            if prior_pcrb is None or q >= len(prior_pcrb):
-                J_prior_inv = np.eye(4) * 1e6  # Large initial uncertainty
-            else:
-                J_prior_inv = prior_pcrb[q]
-            
-            # Predict: J_pred^{-1} = F * J_prior^{-1} * F^T + Q
-            J_pred_inv = F @ J_prior_inv @ F.T + Q_proc
-            
-            # Measurement information
-            state = self.target_states[q]
-            state_vec = np.array([state.position[0], state.position[1],
-                                 state.velocity[0], state.velocity[1]])
-            
-            H = self._compute_measurement_jacobian(state_vec)
-            snr = self.system.compute_sensing_snr(p[q:q+1], b[q:q+1])[0]
-            R = self._compute_measurement_covariance(snr)
-            
-            # Update: J_post = J_pred + H^T * R^{-1} * H
-            J_post = np.linalg.inv(J_pred_inv) + H.T @ np.linalg.inv(R) @ H
-            
-            # PCRB is inverse of posterior FIM
-            pcrb[q] = np.linalg.inv(J_post)
-        
-        return pcrb
-    
-    def compute_pcrb_trace(self, p: np.ndarray, b: np.ndarray,
-                           prior_pcrb: Optional[np.ndarray] = None) -> float:
-        """
-        Compute trace of PCRB for all targets (Eq. 47).
-        
-        min Σ_q trace(PCRB_q)
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        prior_pcrb : np.ndarray, optional
-            Prior PCRB (Q, 4, 4)
-            
-        Returns
-        -------
-        trace_sum : float
-            Sum of PCRB traces across all targets
-        """
+        p, b = self._validate_resources(p, b)
+        target_count = self.system.params.Q
+        transition = self._get_transition_matrix()
+        process_covariance = self._get_process_noise_cov()
+        if prior_pcrb is None:
+            prior = np.tile(
+                np.diag([1.0e6, 1.0e6, 1.0e4, 1.0e4]),
+                (target_count, 1, 1),
+            )
+        else:
+            prior = self._validate_prior(prior_pcrb, target_count)
+
+        posterior = np.zeros((target_count, 4, 4), dtype=float)
+        identity = np.eye(4)
+        for target_index in range(target_count):
+            with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+                predicted_covariance = (
+                    transition @ prior[target_index] @ transition.T
+                    + process_covariance
+                )
+            if not np.all(np.isfinite(predicted_covariance)):
+                raise ValueError(
+                    "predicted covariance is outside the finite numerical domain"
+                )
+            predicted_covariance = 0.5 * (
+                predicted_covariance + predicted_covariance.T
+            )
+            if p[target_index] == 0.0:
+                posterior[target_index] = predicted_covariance
+                continue
+
+            state = self.target_states[target_index]
+            state_vector = np.concatenate([state.position, state.velocity])
+            with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+                predicted_state = transition @ state_vector
+            if not np.all(np.isfinite(predicted_state)):
+                raise ValueError(
+                    "predicted target state is outside the finite numerical domain"
+                )
+            jacobian = self._compute_measurement_jacobian(predicted_state)
+            predicted_angle = float(
+                np.arctan2(predicted_state[1], predicted_state[0])
+            )
+            measurement_covariance = self._compute_measurement_covariance(
+                p[target_index],
+                b[target_index],
+                target_index,
+                predicted_angle,
+            )
+            with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+                innovation_covariance = (
+                    jacobian @ predicted_covariance @ jacobian.T
+                    + measurement_covariance
+                )
+                kalman_gain = np.linalg.solve(
+                    innovation_covariance,
+                    jacobian @ predicted_covariance,
+                ).T
+                residual_map = identity - kalman_gain @ jacobian
+                updated = (
+                    residual_map @ predicted_covariance @ residual_map.T
+                    + kalman_gain @ measurement_covariance @ kalman_gain.T
+                )
+            if not (
+                np.all(np.isfinite(innovation_covariance))
+                and np.all(np.isfinite(kalman_gain))
+                and np.all(np.isfinite(updated))
+            ):
+                raise ValueError(
+                    "tracking update is outside the finite numerical domain"
+                )
+            posterior[target_index] = 0.5 * (updated + updated.T)
+
+        if not np.all(np.isfinite(posterior)):
+            raise RuntimeError("posterior covariance contains non-finite values")
+        return posterior
+
+    def compute_pcrb_position_trace(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        prior_pcrb: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Return each target's 2x2 position-covariance trace in square metres."""
         pcrb = self.compute_pcrb(p, b, prior_pcrb)
-        return np.sum([np.trace(pcrb[q]) for q in range(pcrb.shape[0])])
-    
-    def compute_pcrb_position_trace(self, p: np.ndarray, b: np.ndarray,
-                                     prior_pcrb: Optional[np.ndarray] = None) -> np.ndarray:
-        """
-        Compute PCRB trace for position only (first 2x2 block).
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        prior_pcrb : np.ndarray, optional
-            Prior PCRB (Q, 4, 4)
-            
-        Returns
-        -------
-        position_trace : np.ndarray
-            Position PCRB trace for each target (Q,)
-        """
-        pcrb = self.compute_pcrb(p, b, prior_pcrb)
-        return np.array([np.trace(pcrb[q, :2, :2]) for q in range(pcrb.shape[0])])
-    
-    def update_target_states(self, measurements: Optional[np.ndarray] = None):
-        """
-        Update target states using EKF prediction and update.
-        
-        Parameters
-        ----------
-        measurements : np.ndarray, optional
-            Range and angle measurements (Q, 2). If None, uses predicted states.
-        """
-        F = self._get_transition_matrix()
-        
-        for q in range(len(self.target_states)):
-            state = self.target_states[q]
-            state_vec = np.array([state.position[0], state.position[1],
-                                 state.velocity[0], state.velocity[1]])
-            
-            # Predict
-            state_vec_pred = F @ state_vec
-            
-            if measurements is not None:
-                # Update with measurement
-                H = self._compute_measurement_jacobian(state_vec_pred)
-                meas = measurements[q]
-                
-                # Predicted measurement
-                r_pred = np.sqrt(state_vec_pred[0]**2 + state_vec_pred[1]**2)
-                theta_pred = np.arctan2(state_vec_pred[1], state_vec_pred[0])
-                meas_pred = np.array([r_pred, theta_pred])
-                
-                # Innovation
-                innovation = meas - meas_pred
-                
-                # Simplified Kalman gain
-                K = np.eye(4)[:, :2] @ np.linalg.inv(H @ np.eye(4)[:, :2].T + 
-                                                      np.eye(2) * self.measurement_noise_std**2)
-                
-                # Update
-                state_vec = state_vec_pred + K @ innovation
-            else:
-                state_vec = state_vec_pred
-            
-            # Add process noise
-            state_vec += np.random.normal(0, self.process_noise_std, 4)
-            
-            # Update state
-            self.target_states[q].position = state_vec[:2]
-            self.target_states[q].velocity = state_vec[2:4]
-    
-    def simulate_tracking(self, p: np.ndarray, b: np.ndarray,
-                          num_steps: int = 50) -> Tuple[List[np.ndarray], List[float]]:
-        """
-        Simulate tracking over multiple time steps.
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        num_steps : int
-            Number of time steps to simulate
-            
-        Returns
-        -------
-        pcrb_history : list
-            PCRB at each time step
-        trace_history : list
-            Trace of PCRB at each time step
-        """
-        p = np.asarray(p)
-        b = np.asarray(b)
-        
-        pcrb_history = []
-        trace_history = []
+        return np.trace(pcrb[:, :2, :2], axis1=1, axis2=2)
+
+    def compute_pcrb_trace(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        prior_pcrb: Optional[np.ndarray] = None,
+    ) -> float:
+        """Return the sum of position-block traces only, in square metres."""
+        return float(np.sum(self.compute_pcrb_position_trace(p, b, prior_pcrb)))
+
+    def update_target_states(self) -> None:
+        """Advance each synthetic state once under the declared motion model."""
+        transition = self._get_transition_matrix()
+        process_covariance = self._get_process_noise_cov()
+        for target_index, state in enumerate(self.target_states):
+            state_vector = np.concatenate([state.position, state.velocity])
+            process_noise = self.system.rng.multivariate_normal(
+                np.zeros(4), process_covariance, check_valid="raise"
+            )
+            with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+                updated = transition @ state_vector + process_noise
+            if not np.all(np.isfinite(updated)):
+                raise ValueError(
+                    "predicted target state is outside the finite numerical domain"
+                )
+            self.target_states[target_index].position = updated[:2]
+            self.target_states[target_index].velocity = updated[2:]
+
+    def simulate_tracking(
+        self, p: np.ndarray, b: np.ndarray, num_steps: int = 50
+    ) -> Tuple[List[np.ndarray], List[float]]:
+        """Simulate repeated prediction/update bounds and position traces."""
+        p, b = self._validate_resources(p, b)
+        if not isinstance(num_steps, (int, np.integer)) or num_steps < 1:
+            raise ValueError("num_steps must be a positive integer")
+        pcrb_history: List[np.ndarray] = []
+        position_trace_history: List[float] = []
         prior_pcrb = None
-        
-        for t in range(num_steps):
-            # Compute PCRB
+        for _ in range(num_steps):
             pcrb = self.compute_pcrb(p, b, prior_pcrb)
             pcrb_history.append(pcrb.copy())
-            trace_history.append(np.sum([np.trace(pcrb[q]) for q in range(pcrb.shape[0])]))
-            
-            # Update prior for next step
+            position_trace_history.append(
+                float(np.sum(np.trace(pcrb[:, :2, :2], axis1=1, axis2=2)))
+            )
             prior_pcrb = pcrb
-            
-            # Update target states
             self.update_target_states()
-        
-        return pcrb_history, trace_history
-    
-    def compute_tracking_error_bound(self, p: np.ndarray, b: np.ndarray,
-                                     prior_pcrb: Optional[np.ndarray] = None) -> np.ndarray:
-        """
-        Compute tracking error bound (RMSE) from PCRB.
-        
-        TEB(q) = √trace(PCRB_q)
-        
-        Parameters
-        ----------
-        p : np.ndarray
-            Power allocation (Q,)
-        b : np.ndarray
-            Bandwidth allocation (Q,)
-        prior_pcrb : np.ndarray, optional
-            Prior PCRB (Q, 4, 4)
-            
-        Returns
-        -------
-        teb : np.ndarray
-            Tracking error bounds for each target (Q,)
-        """
-        pcrb = self.compute_pcrb(p, b, prior_pcrb)
-        return np.sqrt(np.array([np.trace(pcrb[q]) for q in range(pcrb.shape[0])]))
+        return pcrb_history, position_trace_history
+
+    def compute_tracking_error_bound(
+        self,
+        p: np.ndarray,
+        b: np.ndarray,
+        prior_pcrb: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Return position error-bound radii from the 2x2 position blocks."""
+        return np.sqrt(self.compute_pcrb_position_trace(p, b, prior_pcrb))

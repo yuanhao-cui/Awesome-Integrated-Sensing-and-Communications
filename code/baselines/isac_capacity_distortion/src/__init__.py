@@ -1,53 +1,42 @@
-"""
-ISAC Capacity-Distortion Tradeoff Baseline
+"""Public API for the educational capacity-distortion surrogate."""
 
-Implements the CRB-rate region analysis for integrated sensing and
-communications (ISAC) under Gaussian channels, based on:
+from .bounds import evaluate_reference_endpoints, evaluate_surrogate_curve
+from .optimization import (
+    covariance_shaping_surrogate,
+    isotropic_covariance,
+    make_semiunitary_waveform,
+    sample_gaussian_waveform,
+    sample_row_semiunitary,
+    water_filling_covariance,
+)
+from .system_model import (
+    GaussianISACChannel,
+    angle_to_channel,
+    angle_to_hfunc,
+    compute_bfim,
+    compute_crb,
+    compute_phi_angle,
+    compute_rate,
+    compute_rate_per_symbol,
+    make_uniform_linear_array,
+)
 
-Y. Xiong, F. Liu, Y. Cui, W. Yuan, et al.,
-"On the Fundamental Tradeoff of Integrated Sensing and Communications
-Under Gaussian Channels,"
-IEEE Transactions on Information Theory, 2023.
-arXiv: https://arxiv.org/abs/2204.06938
-"""
-
-try:
-    from .system_model import (
-        GaussianISACChannel,
-        compute_bfim,
-        compute_crb,
-        compute_rate,
-    )
-    from .bounds import (
-        pentagon_inner_bound,
-        gaussian_inner_bound,
-        semi_unitary_inner_bound,
-        outer_bound,
-    )
-    from .optimization import (
-        optimize_sensing_rx,
-        optimize_comm_rx,
-        covariance_shaping,
-        stiefel_sample,
-    )
-except ImportError:
-    from system_model import (
-        GaussianISACChannel,
-        compute_bfim,
-        compute_crb,
-        compute_rate,
-    )
-    from bounds import (
-        pentagon_inner_bound,
-        gaussian_inner_bound,
-        semi_unitary_inner_bound,
-        outer_bound,
-    )
-    from optimization import (
-        optimize_sensing_rx,
-        optimize_comm_rx,
-        covariance_shaping,
-        stiefel_sample,
-    )
-
-__version__ = "0.1.0"
+__all__ = [
+    "GaussianISACChannel",
+    "angle_to_channel",
+    "angle_to_hfunc",
+    "compute_bfim",
+    "compute_crb",
+    "compute_phi_angle",
+    "compute_rate",
+    "compute_rate_per_symbol",
+    "covariance_shaping_surrogate",
+    "evaluate_reference_endpoints",
+    "evaluate_surrogate_curve",
+    "isotropic_covariance",
+    "make_semiunitary_waveform",
+    "make_uniform_linear_array",
+    "sample_gaussian_waveform",
+    "sample_row_semiunitary",
+    "water_filling_covariance",
+]

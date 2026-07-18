@@ -1,31 +1,32 @@
-# 🧰 Open-Source Tools
+# Open-Source and Research Tools
 
-> Tools and platforms for ISAC research and development.
+> Conservative directory of official project pages, checked on 2026-07-18. Hardware, driver, firmware, regulatory-domain, bandwidth, and antenna support varies by release; confirm compatibility with the project documentation before purchase or deployment.
 
-## CSI Acquisition Platforms
+## WiFi channel and beamforming measurements
 
-| Tool | 802.11 | MIMO | Subcarriers | Bandwidth | Platform | Link |
-|------|--------|------|-------------|-----------|----------|------|
-| PicoScenes | a/g/n/ac/ax/be | 4×4 | 1024 | 320 MHz | x86 Linux | [🔗](https://ps.zpj.io/) |
-| Nexmon CSI | n/ac | 4×4 | 256 | 80 MHz | BCM4339/4358 | [🔗](https://github.com/seemoo-lab/nexmon_csi) |
-| Intel CSI Tool | n | 2×2 | 60 | 40 MHz | iwlwifi | [🔗](https://dhalperi.github.io/linux-80211n-csitool/) |
-| Atheros CSI Tool | n | - | 114 | 40 MHz | Atheros | [🔗](https://github.com/xieyaxiongfly/Atheros-CSI-Tool) |
-| ZTE WiFi Sensing | n/ac/ax | 3×2 | 512 | 160 MHz | ZTE | [🔗](https://github.com/WiFiZTE2025/ZTE_WiFi_Sensing) |
-| Wi-ESP | b/g/n/ac | 2×2 | 64 | 40 MHz | Various | [🔗](https://github.com/wrlab/Wi-ESP) |
+| Project | Primary purpose | Official project page |
+|---|---|---|
+| PicoScenes | WiFi channel-state and physical-layer measurement platform | [PicoScenes](https://ps.zpj.io/) |
+| Nexmon CSI | CSI extraction for supported Broadcom WiFi chipsets | [Nexmon CSI](https://github.com/seemoo-lab/nexmon_csi) |
+| Linux 802.11n CSI Tool | CSI measurement with supported Intel 5300 hardware and drivers | [Intel CSI Tool](https://dhalperi.github.io/linux-80211n-csitool/) |
+| Atheros CSI Tool | CSI extraction for supported Atheros hardware | [Atheros CSI Tool](https://github.com/xieyaxiongfly/Atheros-CSI-Tool) |
+| ZTE WiFi Sensing | WiFi-sensing software and examples for the hardware documented by the project | [ZTE WiFi Sensing](https://github.com/WiFiZTE2025/ZTE_WiFi_Sensing) |
+| Wi-ESP | WiFi measurement tooling for the supported devices listed by the project | [Wi-ESP](https://github.com/wrlab/Wi-ESP) |
+| BFM-Tool | WiFi beamforming-feedback collection and analysis | [BFM-Tool](https://github.com/Enze-Yi/BFM-tool) |
 
-## Beamforming Feedback Tools
+## Simulation and numerical computing
 
-| Tool | 802.11 | MIMO | Subcarriers | Link |
-|------|--------|------|-------------|------|
-| BFM-Tool | ac/ax | 4×4 | 512 | [🔗](https://github.com/Enze-Yi/BFM-tool) |
+| Project | Primary purpose | Official project page |
+|---|---|---|
+| SciPy | Open-source numerical and signal-processing routines for Python | [SciPy](https://scipy.org/) |
+| MATLAB Radar Toolbox | Commercial radar modeling, simulation, and processing toolbox | [Radar Toolbox](https://www.mathworks.com/products/radar.html) |
+| Wireless InSite | Commercial radio-propagation and channel-modeling software | [Wireless InSite](https://www.remcom.com/wireless-insite-propagation-software) |
 
-## Signal Processing Libraries
+## Verification boundary
 
-| Tool | Language | Focus | Link |
-|------|----------|-------|------|
-| SciPy | Python | General signal processing | [🔗](https://scipy.org/) |
-| PyRadar | Python | Radar signal processing | [🔗](...) |
+- Inclusion means that an official project page was identifiable; it is not a security audit, performance endorsement, or compatibility guarantee.
+- Pin the tool version, operating system, driver or firmware, hardware revision, and acquisition settings in experimental records.
+- Do not infer protocol support from a chipset name alone.
+- Project-specific licenses and acceptable-use terms govern the external software; this repository's license does not relicense it.
 
----
-
-*Contributions welcome! See [CONTRIBUTING.md](../CONTRIBUTING.md).*
+Contributions should follow the [curation and evidence policy](../CONTRIBUTING.md).

@@ -1,32 +1,29 @@
-"""
-CSI-Ratio-based Doppler Frequency Estimation in ISAC.
+"""Educational CSI-ratio Doppler-estimation adapters.
 
-Implements three algorithms from the paper:
-- Algorithm 1: Mobius Transformation-based (estimates signed f_D)
-- Algorithm 2: Periodicity-based (estimates |f_D|)
-- Algorithm 3: Signal Difference-based (estimates |f_D|)
+The routines are paper-inspired synthetic baselines, not exact reproductions.
 
 Reference:
     "CSI-Ratio-based Doppler Frequency Estimation in Integrated Sensing
     and Communications" by J. Andrew Zhang, Yuanhao Cui et al.
 """
 
-from signal_model import csi_signal_model, csi_with_doppler
-from csi_ratio import compute_csi_ratio, compute_csi_ratio_multi
-from circle_fit import least_squares_circle_fit, fit_circle_kasa, fit_circle_pratt
-from mobius_estimator import mobius_doppler_estimate
-from periodicity_estimator import periodicity_doppler_estimate
-from difference_estimator import difference_doppler_estimate
+from .signal_model import csi_signal_model, csi_static_dynamic_model, csi_with_doppler
+from .csi_ratio import compute_csi_ratio, compute_csi_ratio_multi
+from .circle_fit import (
+    fit_circle_iterative_weighted,
+    fit_circle_kasa,
+    least_squares_circle_fit,
+)
+from .mobius_estimator import mobius_doppler_estimate
 
 __all__ = [
     "csi_signal_model",
+    "csi_static_dynamic_model",
     "csi_with_doppler",
     "compute_csi_ratio",
     "compute_csi_ratio_multi",
     "least_squares_circle_fit",
     "fit_circle_kasa",
-    "fit_circle_pratt",
+    "fit_circle_iterative_weighted",
     "mobius_doppler_estimate",
-    "periodicity_doppler_estimate",
-    "difference_doppler_estimate",
 ]

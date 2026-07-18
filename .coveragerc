@@ -1,0 +1,15 @@
+[run]
+source = code/baselines
+omit =
+    */tests/*
+    */test_*.py
+    */examples/*
+    */generate_figures.py
+    */setup.py
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:

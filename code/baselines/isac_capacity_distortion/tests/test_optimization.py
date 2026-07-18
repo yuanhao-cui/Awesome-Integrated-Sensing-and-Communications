@@ -1,272 +1,242 @@
-"""Tests for optimization.py - Optimization routines."""
+"""Tests and independent numerical oracles for local optimizers."""
+
+from __future__ import annotations
 
 import numpy as np
 import pytest
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from optimization import (
-    optimize_sensing_rx,
-    optimize_comm_rx,
-    covariance_shaping,
-    stiefel_sample,
-    generate_isotropic_waveform,
-    generate_semi_unitary_waveform,
+from ..src.optimization import (
+    covariance_shaping_surrogate,
+    isotropic_covariance,
+    make_semiunitary_waveform,
+    sample_gaussian_waveform,
+    sample_row_semiunitary,
+    water_filling_covariance,
 )
-from system_model import compute_rate, compute_crb
+from ..src.system_model import compute_rate
 
 
-class TestOptimizeSensingRx:
-    """Tests for sensing-optimal covariance optimization."""
+class TestIsotropicCovariance:
+    def test_value_trace_and_dtype(self) -> None:
+        covariance = isotropic_covariance(1.25, 4)
+        np.testing.assert_array_equal(covariance, 1.25 * np.eye(4))
+        assert covariance.dtype == np.complex128
+        assert np.trace(covariance) == 5
 
-    def test_sensing_rx_shape(self):
-        """Test output has correct shape."""
-        M = 4
-        Rx = optimize_sensing_rx(P_T=1.0, M=M)
-        assert Rx.shape == (M, M)
+    @pytest.mark.parametrize("power", [-1, np.nan, np.inf])
+    def test_rejects_invalid_power(self, power: float) -> None:
+        with pytest.raises(ValueError, match="power_per_tx"):
+            isotropic_covariance(power, 2)
 
-    def test_sensing_rx_psd(self):
-        """Test output is positive semi-definite."""
-        M = 4
-        Rx = optimize_sensing_rx(P_T=1.0, M=M)
-        eigvals = np.linalg.eigvalsh(Rx)
-        assert np.all(eigvals >= -1e-10)
-
-    def test_sensing_rx_power_constraint(self):
-        """Test power constraint is satisfied."""
-        M = 4
-        P_T = 2.0
-        Rx = optimize_sensing_rx(P_T, M)
-        power = np.real(np.trace(Rx))
-        np.testing.assert_allclose(power, P_T * M, rtol=1e-6)
-
-    def test_sensing_rx_hermitian(self):
-        """Test output is Hermitian."""
-        M = 4
-        Rx = optimize_sensing_rx(P_T=1.0, M=M)
-        np.testing.assert_allclose(Rx, Rx.conj().T, atol=1e-10)
-
-    def test_sensing_rx_isotropic(self):
-        """Test sensing-optimal Rx is approximately P_T*I."""
-        M = 4
-        P_T = 1.0
-        Rx = optimize_sensing_rx(P_T, M)
-        Rx_expected = P_T * np.eye(M)
-        np.testing.assert_allclose(Rx, Rx_expected, rtol=1e-6)
+    @pytest.mark.parametrize("antennas", [0, -1, 1.5, True])
+    def test_rejects_invalid_dimension(self, antennas: object) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            isotropic_covariance(1, antennas)  # type: ignore[arg-type]
 
 
-class TestOptimizeCommRx:
-    """Tests for communication-optimal covariance optimization."""
+class TestWaterFilling:
+    def test_diagonal_solution_matches_closed_form(self) -> None:
+        channel = np.diag([2.0, 1.0])
+        covariance = water_filling_covariance(1.0, channel, sigma_c2=1.0)
+        expected = np.diag([1.375, 0.625])
+        np.testing.assert_allclose(covariance, expected, rtol=0, atol=2e-15)
 
-    def test_comm_rx_shape(self):
-        """Test output has correct shape."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = optimize_comm_rx(P_T=1.0, M=M, Hc=Hc)
-        assert Rx.shape == (M, M)
+    def test_high_noise_deactivates_weak_mode(self) -> None:
+        covariance = water_filling_covariance(
+            1.0,
+            np.diag([2.0, 1.0]),
+            sigma_c2=100,
+        )
+        np.testing.assert_allclose(covariance, np.diag([2.0, 0.0]), atol=1e-14)
 
-    def test_comm_rx_psd(self):
-        """Test output is positive semi-definite."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = optimize_comm_rx(P_T=1.0, M=M, Hc=Hc)
-        eigvals = np.linalg.eigvalsh(Rx)
-        assert np.all(eigvals >= -1e-10)
+    def test_zero_channel_uses_deterministic_isotropic_tie_break(self) -> None:
+        covariance = water_filling_covariance(2.0, np.zeros((2, 3)), 1.0)
+        np.testing.assert_array_equal(covariance, 2 * np.eye(3))
 
-    def test_comm_rx_power_constraint(self):
-        """Test power constraint is satisfied."""
-        np.random.seed(42)
-        M, Nc = 4, 2
-        P_T = 2.0
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = optimize_comm_rx(P_T, M, Hc)
-        power = np.real(np.trace(Rx))
-        # Allow some tolerance for numerical optimization
-        assert abs(power - P_T * M) / (P_T * M) < 0.1, f"Power {power} != expected {P_T * M}"
+    def test_zero_power_returns_zero(self) -> None:
+        covariance = water_filling_covariance(0, np.ones((2, 3)), 1)
+        np.testing.assert_array_equal(covariance, np.zeros((3, 3)))
 
-    def test_comm_rx_hermitian(self):
-        """Test output is Hermitian."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = optimize_comm_rx(P_T=1.0, M=M, Hc=Hc)
-        np.testing.assert_allclose(Rx, Rx.conj().T, atol=1e-10)
+    def test_dynamic_range_safe_water_filling(self) -> None:
+        channel = np.diag([2e-200, 1e-200])
+        covariance = water_filling_covariance(1, channel, 1e-300)
+        np.testing.assert_allclose(covariance, np.diag([2.0, 0.0]), atol=0)
+        rate = compute_rate(covariance, channel, 1e-300)
+        assert rate > 0
+        np.testing.assert_allclose(rate, np.log1p(8e-100), rtol=2e-15)
 
-    def test_comm_rx_achieves_higher_rate(self):
-        """Test comm-optimal Rx achieves >= sensing-optimal rate."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        P_T = 1.0
+    @pytest.mark.parametrize("exponent", [155, 158, 160, 161])
+    def test_subnormal_gain_water_filling_avoids_reciprocal_overflow(
+        self,
+        exponent: int,
+    ) -> None:
+        scale = 10.0 ** (-exponent)
+        channel = np.diag([2 * scale, scale])
+        covariance = water_filling_covariance(1, channel, 1)
+        np.testing.assert_allclose(covariance, np.diag([2.0, 0.0]), atol=0)
+        assert compute_rate(covariance, channel, 1) > 0
 
-        Rx_comm = optimize_comm_rx(P_T, M, Hc)
-        Rx_sense = optimize_sensing_rx(P_T, M)
+    def test_rejects_unrepresentable_total_power_budget(self) -> None:
+        with pytest.raises(ValueError, match="total power budget"):
+            water_filling_covariance(1e308, np.eye(2), 1)
+        with pytest.raises(ValueError, match="total power budget"):
+            covariance_shaping_surrogate(0.5, 1e308, np.eye(2), 1)
 
-        rate_comm = compute_rate(Rx_comm, Hc, sigma_c2=1.0)
-        rate_sense = compute_rate(Rx_sense, Hc, sigma_c2=1.0)
+    def test_dense_simplex_grid_oracle(self) -> None:
+        channel = np.diag([2.0, 0.75])
+        sigma = 0.8
+        covariance = water_filling_covariance(1.0, channel, sigma)
+        solver_power = float(covariance[0, 0].real)
+        grid = np.linspace(0, 2, 200_001)
+        gains = np.array([4.0, 0.75**2]) / sigma
+        rates = np.log1p(gains[0] * grid) + np.log1p(gains[1] * (2 - grid))
+        grid_power = float(grid[int(np.argmax(rates))])
+        assert abs(solver_power - grid_power) <= 1.1 * float(grid[1] - grid[0])
 
-        assert rate_comm >= rate_sense - 1e-6
+    def test_random_psd_competitors_do_not_beat_solution(self) -> None:
+        rng = np.random.default_rng(19)
+        channel = (
+            rng.standard_normal((2, 3)) + 1j * rng.standard_normal((2, 3))
+        ) / np.sqrt(2)
+        optimum = water_filling_covariance(1.0, channel, 0.7)
+        optimum_rate = compute_rate(optimum, channel, 0.7)
+        for _ in range(1_000):
+            factor = (
+                rng.standard_normal((3, 3))
+                + 1j * rng.standard_normal((3, 3))
+            ) / np.sqrt(2)
+            competitor = factor @ factor.conj().T
+            competitor *= 3 / np.trace(competitor).real
+            assert compute_rate(competitor, channel, 0.7) <= optimum_rate + 1e-12
 
-    def test_comm_rx_siso(self):
-        """Test comm-optimal Rx for SISO channel."""
-        M, Nc = 1, 1
-        Hc = np.array([[1.0]], dtype=np.complex128)
-        P_T = 5.0
-
-        Rx = optimize_comm_rx(P_T, M, Hc)
-        np.testing.assert_allclose(Rx, [[P_T]], rtol=1e-6)
-
-
-class TestCovarianceShaping:
-    """Tests for covariance shaping optimization."""
-
-    def test_covariance_shaping_shape(self):
-        """Test output has correct shape."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = covariance_shaping(alpha=0.5, P_T=1.0, M=M, Hc=Hc)
-        assert Rx.shape == (M, M)
-
-    def test_covariance_shaping_psd(self):
-        """Test output is positive semi-definite."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = covariance_shaping(alpha=0.5, P_T=1.0, M=M, Hc=Hc)
-        eigvals = np.linalg.eigvalsh(Rx)
-        assert np.all(eigvals >= -1e-10)
-
-    def test_covariance_shaping_power(self):
-        """Test power constraint is satisfied."""
-        M, Nc = 4, 2
-        P_T = 2.0
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = covariance_shaping(alpha=0.5, P_T=P_T, M=M, Hc=Hc)
-        power = np.real(np.trace(Rx))
-        np.testing.assert_allclose(power, P_T * M, rtol=1e-3)
-
-    def test_covariance_shaping_alpha_zero(self):
-        """Test alpha=0 gives sensing-optimal Rx."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-        Rx = covariance_shaping(alpha=0.0, P_T=1.0, M=M, Hc=Hc)
-
-        # Should be approximately P_T * I
-        Rx_expected = 1.0 * np.eye(M)
-        np.testing.assert_allclose(Rx, Rx_expected, rtol=0.15)
-
-    def test_covariance_shaping_alpha_one(self):
-        """Test alpha=1 gives comm-optimal Rx."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-
-        Rx_alpha1 = covariance_shaping(alpha=0.99, P_T=1.0, M=M, Hc=Hc)
-        Rx_comm = optimize_comm_rx(1.0, M, Hc)
-
-        # Both should achieve similar rate
-        rate_alpha1 = compute_rate(Rx_alpha1, Hc, sigma_c2=1.0)
-        rate_comm = compute_rate(Rx_comm, Hc, sigma_c2=1.0)
-
-        # Allow 25% tolerance for different optimization approaches
-        np.testing.assert_allclose(rate_alpha1, rate_comm, rtol=0.25)
-
-    def test_covariance_shaping_tradeoff(self):
-        """Test tradeoff behavior as alpha varies."""
-        M, Nc = 4, 2
-        Hc = (np.random.randn(Nc, M) + 1j * np.random.randn(Nc, M)) / np.sqrt(2)
-
-        rates = []
-        for alpha in [0.0, 0.5, 1.0]:
-            Rx = covariance_shaping(alpha, 1.0, M, Hc)
-            rate = compute_rate(Rx, Hc, sigma_c2=1.0)
-            rates.append(rate)
-
-        # Rate should increase with alpha
-        assert rates[0] <= rates[1] + 0.1
-        assert rates[1] <= rates[2] + 0.1
+    def test_rejects_invalid_inputs(self) -> None:
+        with pytest.raises(ValueError, match="two-dimensional"):
+            water_filling_covariance(1, np.ones(2), 1)
+        with pytest.raises(ValueError, match="finite"):
+            water_filling_covariance(1, np.array([[np.nan]]), 1)
+        with pytest.raises(ValueError, match="sigma_c2"):
+            water_filling_covariance(1, np.eye(2), 0)
 
 
-class TestStiefelSample:
-    """Tests for Stiefel manifold sampling."""
+class TestCovarianceSurrogate:
+    def test_endpoints_are_explicit_reference_solutions(self) -> None:
+        channel = np.array([[1.0, 0.2], [0.1, 0.5]])
+        np.testing.assert_allclose(
+            covariance_shaping_surrogate(0, 1, channel, 0.4),
+            np.eye(2),
+        )
+        np.testing.assert_allclose(
+            covariance_shaping_surrogate(1, 1, channel, 0.4),
+            water_filling_covariance(1, channel, 0.4),
+        )
 
-    def test_stiefel_sample_shape(self):
-        """Test output has correct shape."""
-        M_sc, T = 3, 5
-        Q = stiefel_sample(M_sc, T)
-        assert Q.shape == (M_sc, T)
+    def test_interior_solution_matches_dense_grid(self) -> None:
+        alpha = 0.37
+        channel = np.diag([2.0, 0.75])
+        sigma = 0.8
+        covariance = covariance_shaping_surrogate(alpha, 1, channel, sigma)
+        solver_power = float(covariance[0, 0].real)
+        count = 200_001
+        step = 2 / (count + 1)
+        grid = np.linspace(step, 2 - step, count)
+        gains = np.array([4.0, 0.75**2]) / sigma
+        objective = (
+            -(1 - alpha) * (np.log(grid) + np.log(2 - grid))
+            - alpha
+            * (np.log1p(gains[0] * grid) + np.log1p(gains[1] * (2 - grid)))
+        )
+        grid_power = float(grid[int(np.argmin(objective))])
+        assert abs(solver_power - grid_power) <= 1.1 * step
 
-    def test_stiefel_sample_semi_unitary(self):
-        """Test Q is semi-unitary: Q Q^H = I."""
-        M_sc, T = 3, 5
-        Q = stiefel_sample(M_sc, T)
-        QQh = Q @ Q.conj().T
-        np.testing.assert_allclose(QQh, np.eye(M_sc), atol=1e-10)
+    def test_extreme_channel_quadratic_root_is_scale_safe(self) -> None:
+        covariance = covariance_shaping_surrogate(
+            0.5,
+            1.0,
+            np.array([[1.0e154]], dtype=np.complex128),
+            1.0,
+        )
+        np.testing.assert_array_equal(covariance, np.ones((1, 1)))
 
-    def test_stiefel_sample_uniformity(self):
-        """Test samples are approximately uniformly distributed."""
-        np.random.seed(42)
-        M_sc, T = 2, 3
-        n_samples = 1000
+    def test_power_gain_product_need_not_be_representable(self) -> None:
+        covariance = covariance_shaping_surrogate(
+            0.5,
+            1.0,
+            np.diag([1.0e154, 0.0]).astype(np.complex128),
+            1.0,
+        )
+        np.testing.assert_allclose(
+            covariance,
+            np.diag([4 / 3, 2 / 3]),
+            rtol=0,
+            atol=2e-15,
+        )
 
-        # For 2x3 Stiefel, sample trace(Q Q^H) should be 2 (identity)
-        # Test: average of Q Q^H over samples should be (M_sc/T) * I_T
-        QQh_avg = np.zeros((T, T), dtype=np.complex128)
-        for _ in range(n_samples):
-            Q = stiefel_sample(M_sc, T)
-            # Q^H Q is the projection onto the column space
-            QQh = Q.conj().T @ Q
-            QQh_avg += QQh
-        QQh_avg /= n_samples
+    @pytest.mark.parametrize("alpha", [0.1, 0.5, 0.9, 0.999999])
+    def test_kkt_stationarity_and_constraints(self, alpha: float) -> None:
+        channel = np.diag([3.0, 1.2, 0.25])
+        sigma = 0.6
+        covariance = covariance_shaping_surrogate(alpha, 1, channel, sigma)
+        powers = np.real(np.diag(covariance))
+        gains = np.diag(channel) ** 2 / sigma
+        stationarity = (
+            (1 - alpha) / powers + alpha * gains / (1 + gains * powers)
+        )
+        assert float(np.ptp(stationarity)) < 3e-12
+        np.testing.assert_allclose(np.trace(covariance), 3, atol=2e-12)
+        assert float(np.min(np.linalg.eigvalsh(covariance))) > 0
 
-        # Expected: (M_sc / T) * I_T
-        expected = (M_sc / T) * np.eye(T)
-        np.testing.assert_allclose(QQh_avg, expected, atol=0.1)
+    def test_rotated_channel_solution_commutes_with_gram(self) -> None:
+        rng = np.random.default_rng(3)
+        channel = (
+            rng.standard_normal((3, 3)) + 1j * rng.standard_normal((3, 3))
+        ) / np.sqrt(2)
+        covariance = covariance_shaping_surrogate(0.4, 1, channel, 0.9)
+        gram = channel.conj().T @ channel
+        assert np.linalg.norm(covariance @ gram - gram @ covariance) < 2e-13
 
-    def test_stiefel_sample_deterministic_seed(self):
-        """Test reproducibility with same seed."""
-        np.random.seed(123)
-        Q1 = stiefel_sample(3, 5)
-
-        np.random.seed(123)
-        Q2 = stiefel_sample(3, 5)
-
-        np.testing.assert_allclose(Q1, Q2)
+    @pytest.mark.parametrize("alpha", [-0.1, 1.1, np.nan])
+    def test_rejects_invalid_alpha(self, alpha: float) -> None:
+        with pytest.raises(ValueError, match="alpha"):
+            covariance_shaping_surrogate(alpha, 1, np.eye(2), 1)
 
 
-class TestWaveformGeneration:
-    """Tests for waveform generation functions."""
+class TestWaveforms:
+    def test_row_semiunitarity_and_seed_repeatability(self) -> None:
+        first = sample_row_semiunitary(3, 8, np.random.default_rng(101))
+        second = sample_row_semiunitary(3, 8, np.random.default_rng(101))
+        np.testing.assert_array_equal(first, second)
+        np.testing.assert_allclose(first @ first.conj().T, np.eye(3), atol=1e-14)
 
-    def test_isotropic_waveform_shape(self):
-        """Test isotropic waveform shape."""
-        M, T = 4, 10
-        X = generate_isotropic_waveform(P_T=1.0, M=M, T=T)
-        assert X.shape == (M, T)
+    def test_semiunitary_waveform_has_exact_sample_covariance(self) -> None:
+        basis = np.eye(4, 2, dtype=np.complex128)
+        waveform, q_rows = make_semiunitary_waveform(
+            1.5,
+            4,
+            7,
+            np.random.default_rng(6),
+            basis=basis,
+        )
+        covariance = waveform @ waveform.conj().T / 7
+        expected = 1.5 * 4 / 2 * basis @ basis.conj().T
+        np.testing.assert_allclose(covariance, expected, atol=2e-15)
+        np.testing.assert_allclose(q_rows @ q_rows.conj().T, np.eye(2), atol=1e-14)
 
-    def test_isotropic_waveform_power(self):
-        """Test isotropic waveform satisfies power constraint."""
-        M, T = 4, 100
-        P_T = 2.0
-        X = generate_isotropic_waveform(P_T, M, T)
+    def test_gaussian_waveform_seed_repeatability_and_shape(self) -> None:
+        first = sample_gaussian_waveform(0.5, 3, 9, np.random.default_rng(8))
+        second = sample_gaussian_waveform(0.5, 3, 9, np.random.default_rng(8))
+        np.testing.assert_array_equal(first, second)
+        assert first.shape == (3, 9)
 
-        # Average power per symbol: (1/T) tr(X X^H) = P_T * M
-        Rx = (X @ X.conj().T) / T
-        avg_power = np.real(np.trace(Rx))
-        np.testing.assert_allclose(avg_power, P_T * M, rtol=0.15)
-
-    def test_semi_unitary_waveform_shape(self):
-        """Test semi-unitary waveform shape."""
-        M, T = 4, 6
-        M_sc = 3
-        X, Q = generate_semi_unitary_waveform(P_T=1.0, M_sc=M_sc, M=M, T=T)
-        assert X.shape == (M, T)
-        assert Q.shape == (M_sc, T)
-
-    def test_semi_unitary_waveform_power(self):
-        """Test semi-unitary waveform power."""
-        M, T = 4, 6
-        M_sc = 3
-        P_T = 2.0
-        X, _ = generate_semi_unitary_waveform(P_T, M_sc, M, T)
-
-        Rx = (X @ X.conj().T) / T
-        avg_power = np.real(np.trace(Rx))
-        np.testing.assert_allclose(avg_power, P_T * M, rtol=0.25)
+    def test_waveform_input_validation(self) -> None:
+        with pytest.raises(ValueError, match="rows cannot exceed"):
+            sample_row_semiunitary(3, 2, np.random.default_rng(1))
+        with pytest.raises(TypeError, match="Generator"):
+            sample_row_semiunitary(2, 3, 1)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="orthonormal"):
+            make_semiunitary_waveform(
+                1,
+                2,
+                3,
+                np.random.default_rng(1),
+                basis=np.ones((2, 2)),
+            )

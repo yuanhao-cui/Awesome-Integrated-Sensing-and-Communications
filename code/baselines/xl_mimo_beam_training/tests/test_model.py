@@ -5,7 +5,7 @@ import torch
 
 import sys
 sys.path.insert(0, "..")
-from src.model import BeamTrainingNet
+from ..src.model import BeamTrainingNet
 
 
 class TestBeamTrainingNet:
@@ -85,3 +85,20 @@ class TestBeamTrainingNet:
             x = torch.randn(4, 1, 2, Nt)
             output = model(x)
             assert output.shape == (4, Nt), f"Failed for Nt={Nt}"
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"out_channels": 2},
+            {"antenna_count": 63},
+            {"antenna_count": 0},
+            {"init_features": 0},
+        ],
+    )
+    def test_unsupported_model_shapes_are_rejected(self, kwargs):
+        with pytest.raises(ValueError):
+            BeamTrainingNet(**kwargs)
+
+    def test_forward_rejects_wrong_antenna_axis(self, model):
+        with pytest.raises(ValueError, match="shape"):
+            model(torch.randn(2, 1, 2, 128))

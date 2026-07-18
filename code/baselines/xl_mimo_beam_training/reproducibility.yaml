@@ -1,0 +1,112 @@
+---
+schema_version: 1
+baseline: xl_mimo_beam_training
+reference:
+  doi: 10.1109/TMC.2024.3462960
+evidence_level: educational-surrogate
+paper_figure_parity: false
+model: >-
+  Compact encoder-decoder CNN mapping synthetic estimated near-field CSI to
+  constant-modulus phases, trained with a Hermitian coherent-rate loss.
+assumptions:
+  - Synthetic spherical-wave channels replace the unavailable paper dataset.
+  - Beam coefficients have unit element magnitude and norm square Nt.
+  - The rate normalization is SNR divided by the actual antenna count.
+  - The full-digital channel direction is a reference, not an analog optimum.
+  - External finite phase coordinates wrap with period 2 under exp(j*pi*v).
+parameters:
+  seed: 20260717
+  certificate_antenna_count: 64
+  low_snr_antenna_count: 256
+  coherent_test_snr_linear: 1.0
+  tiny_channel_element_magnitude: 1.0e-6
+  dynamic_range_channel_magnitudes:
+    - 1.0e-30
+    - 1.0e20
+  maximum_checked_geometry_distance_meter: 1.0e308
+  exact_cancellation_large_term: 1.0e280
+  exact_cancellation_residual: 1.0e-60
+  pre_rounding_product_cancellation_component: 1.7e308
+  final_gradient_cancellation_residual: 1.0e-300
+  final_gradient_snr_linear: 1.0e300
+oracle:
+  type: closed-form-coherent-gain-and-seeded-repeatability
+  expected:
+    coherent_rate_64_antennas_bit_per_second_per_hz: 6.022367813028454
+    tiny_rate_bit_per_second_per_hz: 3.6932993042030045e-10
+    complex128_cancellation_rate_bit_per_second_per_hz: 7.213475204444818e-21
+    complex64_1e-30_rate_is_positive: true
+    complex64_1e20_rate_is_finite: true
+    huge_cancellation_tail_rate_bit_per_second_per_hz: 0.41503749927884376
+    subrange_cancellation_tail_rate_bit_per_second_per_hz: 4.808983469629878e-21
+    overflowing_individual_products_cancel_to_zero: true
+    extreme_cancellation_gradient_rate_bit_per_second_per_hz: 4.808983469629878e-301
+    extreme_cancellation_phase_gradient:
+      - 3.021573427884796e280
+      - -3.021573427884796e280
+      - 0.0
+    nonrepresentable_final_gradient_is_explicit: true
+    upstream_scaled_phase_gradient:
+      - 3.021573427884796e307
+      - -3.021573427884796e307
+      - 0.0
+    original_dtype_gradient_overflow_is_explicit: true
+    roundable_float32_subnormal_phase_gradient:
+      - -1.401298464324817e-45
+      - 1.401298464324817e-45
+    roundable_float32_upper_edge_phase_gradient:
+      - -3.4028234663852886e38
+      - 3.4028234663852886e38
+    seeded_synthetic_data_repeatability: bitwise
+    extreme_finite_geometry_is_supported: true
+tolerances:
+  coherent_rate_absolute: 1.0e-6
+  tiny_rate_absolute: 3.0e-15
+  dynamic_range_relative: 2.0e-7
+  subrange_cancellation_relative: 2.0e-13
+  final_gradient_relative: 3.0e-13
+evidence:
+  command: >-
+    python scripts/verify_simulation_baseline.py
+    xl_mimo_beam_training --json
+  certificate_checks:
+    - complex128_cancellation_residual_preserved
+    - complex64_large_channel_rate_is_finite
+    - complex64_tiny_channel_rate_is_positive
+    - final_gradient_scaling_precedes_range_check
+    - final_rate_autograd_is_finite_after_extreme_cancellation
+    - nondefault_array_normalization
+    - overflowing_exact_products_cancel_before_rounding
+    - roundable_float32_subnormal_gradient_is_preserved
+    - roundable_float32_upper_edge_gradient_is_preserved
+    - seeded_channel_data_is_repeatable
+    - subrange_tail_survives_1e280_exact_cancellation
+    - tiny_positive_rate_preserved
+    - target_dtype_gradient_overflow_is_explicit
+    - unit_tail_survives_1e200_exact_cancellation
+    - unrepresentable_final_gradient_is_explicit
+  checks:
+    - Hermitian coherent combining with a nondefault array size
+    - log1p preservation of a tiny positive float32 rate
+    - seeded perfect and estimated synthetic CSI repeatability
+    - scale-safe rates for cancellation, tiny, and large channel counterexamples
+    - compensated permutation-invariant sum for a unit tail between 1e200 terms
+    - exact binary64 superaccumulation for a 1e-60 tail between 1e280 terms
+    - exact pre-rounding complex products whose individually overflowing terms cancel
+    - final-rate autograd scaling for a 1e-300 tail between complex 1e280 terms
+    - upstream scaling before the final binary64 gradient range decision
+    - round-to-nearest preservation of a 0.75-minsub float32 phase gradient
+    - round-to-nearest preservation just above the finite float32 maximum
+    - explicit rejection when a requested final gradient exceeds binary64 or
+      the original complex64/float32 input dtype
+    - explicit float32 feature conversion domain
+    - overflow-safe exact spherical distance and reduced phase at 1e308 meters
+limitations:
+  - The official paper dataset and trained checkpoint are not redistributed.
+  - No paper curve, learned-model quality, or optimality claim is certified.
+  - The certificate does not train a production model.
+  - SNR is a fixed condition; gradients are defined for channels and phases only.
+  - The exact loss synchronizes through CPU binary-integer arithmetic and is a
+    reference training primitive, not a high-throughput production kernel.
+  - Requested final gradients outside binary64 or the original input dtype
+    raise an explicit range error during backward propagation.
