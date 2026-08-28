@@ -7,7 +7,7 @@ dependencies = []
 
 [dependency-groups]
 integrity = [
-  "pytest==8.3.5",
+  "pytest==9.1.1",
   "PyYAML==6.0.2",
   "yamllint==1.35.1",
   "jsonschema==4.25.1",

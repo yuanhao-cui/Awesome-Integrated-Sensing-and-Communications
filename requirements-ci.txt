@@ -1,7 +1,7 @@
 # Exact direct constraints for baseline-local installs and Dependabot updates.
 # The matching ``ci`` group in pyproject.toml is the authoritative declaration;
 # uv.lock fixes every transitive dependency and artifact hash for Python 3.10-3.12.
-pytest==8.3.5
+pytest==9.1.1
 pytest-cov==6.0.0
 numpy==1.26.4
 scipy==1.13.1
