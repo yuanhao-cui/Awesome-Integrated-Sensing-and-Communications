@@ -15,7 +15,7 @@ integrity = [
 ci = [
   { include-group = "integrity" },
   "pytest-cov==6.0.0",
-  "numpy==1.26.4",
+  "numpy==2.2.6",
   "scipy==1.13.1",
   "matplotlib==3.10.9",
   "cvxpy==1.6.5",

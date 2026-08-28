@@ -3,7 +3,7 @@
 # uv.lock fixes every transitive dependency and artifact hash for Python 3.10-3.12.
 pytest==8.3.5
 pytest-cov==6.0.0
-numpy==1.26.4
+numpy==2.2.6
 scipy==1.13.1
 matplotlib==3.10.9
 PyYAML==6.0.2
