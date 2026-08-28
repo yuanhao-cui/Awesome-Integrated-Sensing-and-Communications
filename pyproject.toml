@@ -20,7 +20,7 @@ ci = [
   "matplotlib==3.10.9",
   "cvxpy==1.6.5",
   "scikit-learn==1.5.2",
-  "torch==2.5.1",
+  "torch==2.13.0",
   "ruff==0.9.10",
 ]
 cff-validation = [
