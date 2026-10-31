@@ -5,7 +5,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2504.06830-b31b1b?logo=arxiv)](https://arxiv.org/abs/2504.06830)
 [![Featured](https://img.shields.io/badge/Featured-53-orange)](#-featured-papers)
 [![Datasets](https://img.shields.io/badge/Datasets-11-purple)](#-datasets--benchmarks)
-[![Tools](https://img.shields.io/badge/Tools-10-green)](#-open-source-and-research-tools)
+[![Tools](https://img.shields.io/badge/Tools-11-green)](#-open-source-and-research-tools)
 [![Baselines](https://img.shields.io/badge/Baselines-7-2ea44f)](#-reproducible-baselines--evidence-graded)
 [![Stars](https://img.shields.io/github/stars/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications?style=social)](https://github.com/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications)
 [![Tests](https://img.shields.io/github/actions/workflow/status/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications/test.yml?label=CI)](https://github.com/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications/actions)
