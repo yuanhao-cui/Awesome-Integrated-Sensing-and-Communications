@@ -394,6 +394,7 @@ document versions, maturity labels, dates, and evidence boundaries.
 > Official project pages were checked on 2026-07-18. Hardware, firmware, driver,
 > operating-system, protocol, bandwidth, and antenna compatibility can vary by
 > release; verify the exact project documentation before purchase or deployment.
+> The added Router CSI Toolkit entry was checked separately on 2026-11-01.
 
 ### WiFi channel and beamforming measurements
 
@@ -406,6 +407,7 @@ document versions, maturity labels, dates, and evidence boundaries.
 | ZTE WiFi Sensing | WiFi-sensing software and examples for hardware documented by the project | [ZTE WiFi Sensing](https://github.com/WiFiZTE2025/ZTE_WiFi_Sensing) |
 | Wi-ESP | WiFi measurement tooling for devices documented by the project | [Wi-ESP](https://github.com/wrlab/Wi-ESP) |
 | BFM-Tool | WiFi beamforming-feedback collection and analysis | [BFM-Tool](https://github.com/Enze-Yi/BFM-tool) |
+| Router CSI Toolkit | OpenWrt/mt76 CSI capture, analysis and experiment-tuning scripts for the project-documented GL-MT6000 environment | [Router CSI Toolkit](https://github.com/jjjwu/router-csi-toolkit) |
 
 ### Simulation and numerical computing
 
