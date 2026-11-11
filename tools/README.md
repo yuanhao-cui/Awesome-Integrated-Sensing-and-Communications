@@ -1,6 +1,6 @@
 # Open-Source and Research Tools
 
-> Conservative directory of official project pages, checked on 2026-07-18. Hardware, driver, firmware, regulatory-domain, bandwidth, and antenna support varies by release; confirm compatibility with the project documentation before purchase or deployment. The added Router CSI Toolkit entry was checked separately on 2026-11-01.
+> Conservative directory of official project pages, checked on 2026-07-18. Hardware, driver, firmware, regulatory-domain, bandwidth, and antenna support varies by release; confirm compatibility with the project documentation before purchase or deployment. The added Router CSI Toolkit entry was rechecked on 2026-11-11 against toolkit v0.2.0 and its independent Software Heritage snapshot.
 
 ## WiFi channel and beamforming measurements
 
