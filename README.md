@@ -394,7 +394,7 @@ document versions, maturity labels, dates, and evidence boundaries.
 > Official project pages were checked on 2026-07-18. Hardware, firmware, driver,
 > operating-system, protocol, bandwidth, and antenna compatibility can vary by
 > release; verify the exact project documentation before purchase or deployment.
-> The added Router CSI Toolkit entry was checked separately on 2026-11-01.
+> The added Router CSI Toolkit entry was checked separately on 2026-11-11; toolkit v0.2.0 and its independent Software Heritage snapshot were rechecked.
 
 ### WiFi channel and beamforming measurements
 
