@@ -5,7 +5,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2504.06830-b31b1b?logo=arxiv)](https://arxiv.org/abs/2504.06830)
 [![Featured](https://img.shields.io/badge/Featured-53-orange)](#-featured-papers)
 [![Datasets](https://img.shields.io/badge/Datasets-11-purple)](#-datasets--benchmarks)
-[![Tools](https://img.shields.io/badge/Tools-10-green)](#-open-source-and-research-tools)
+[![Tools](https://img.shields.io/badge/Tools-11-green)](#-open-source-and-research-tools)
 [![Baselines](https://img.shields.io/badge/Baselines-7-2ea44f)](#-reproducible-baselines--evidence-graded)
 [![Stars](https://img.shields.io/github/stars/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications?style=social)](https://github.com/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications)
 [![Tests](https://img.shields.io/github/actions/workflow/status/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications/test.yml?label=CI)](https://github.com/yuanhao-cui/Awesome-Integrated-Sensing-and-Communications/actions)
@@ -394,6 +394,7 @@ document versions, maturity labels, dates, and evidence boundaries.
 > Official project pages were checked on 2026-07-18. Hardware, firmware, driver,
 > operating-system, protocol, bandwidth, and antenna compatibility can vary by
 > release; verify the exact project documentation before purchase or deployment.
+> The added Router CSI Toolkit entry was checked separately on 2026-11-11; toolkit v0.2.0 and its independent Software Heritage snapshot were rechecked.
 
 ### WiFi channel and beamforming measurements
 
@@ -406,6 +407,7 @@ document versions, maturity labels, dates, and evidence boundaries.
 | ZTE WiFi Sensing | WiFi-sensing software and examples for hardware documented by the project | [ZTE WiFi Sensing](https://github.com/WiFiZTE2025/ZTE_WiFi_Sensing) |
 | Wi-ESP | WiFi measurement tooling for devices documented by the project | [Wi-ESP](https://github.com/wrlab/Wi-ESP) |
 | BFM-Tool | WiFi beamforming-feedback collection and analysis | [BFM-Tool](https://github.com/Enze-Yi/BFM-tool) |
+| Router CSI Toolkit | OpenWrt/mt76 CSI capture, analysis and experiment-tuning scripts for the project-documented GL-MT6000 environment | [Router CSI Toolkit](https://github.com/jjjwu/router-csi-toolkit) |
 
 ### Simulation and numerical computing
 
